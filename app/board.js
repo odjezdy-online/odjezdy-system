@@ -117,8 +117,109 @@ for (const dir of THEME_DIRS) {
 }
 // BUSE first, the rest alphabetically
 THEMES.sort((a, b) => (a.id === 'buse' ? -1 : b.id === 'buse' ? 1 : a.name.localeCompare(b.name)));
+// user customisation on top of the theme (settings screen): LED colour, dot style, brightness
+const LED_TINTS = {
+  amber: [255, 136, 0], green: [1, 255, 1], blue: [1, 208, 255], red: [254, 20, 10], white: [255, 255, 255], yellow: [255, 214, 0],
+};
+const TINT_NAMES = { theme: 'podle vzhledu', amber: 'jantarová', green: 'zelená', blue: 'modrá', red: 'červená', white: 'bílá', yellow: 'žlutá' };
+let lookCache = { key: null };
+function currentLook() {
+  const th = currentTheme();
+  const c = state.cfg?.custom || {};
+  const key = [th.id, c.tint, c.style, c.brightness].join('|');
+  if (lookCache.key === key) return lookCache;
+  const k = (c.brightness ?? 100) / 100;
+  const dim = (rgb) => rgb && rgb.map((v) => Math.round(v * k));
+  const palette = th.palette.map((p, i) => {
+    if (!p) return p;
+    if (c.tint && c.tint !== 'theme' && (i === 1 || i === 2)) {
+      const t = LED_TINTS[c.tint] || p;
+      return dim(i === 2 ? t.map((v) => Math.round(v * 0.43)) : t);
+    }
+    return dim(p);
+  });
+  lookCache = {
+    key, theme: th, palette,
+    style: c.style && c.style !== 'theme' ? c.style : th.style,
+    background: th.background,
+    unlit: dim(th.unlit),
+  };
+  return lookCache;
+}
+
 function currentTheme() {
   return THEMES.find((th) => th.id === state.cfg?.theme) || THEMES[0];
+}
+
+// ---------------------------------------------------------------- mouse pointer (evdev)
+// 12x19 arrow: '#' white, '.' black outline, ' ' transparent
+const CURSOR = [
+  '.           ', '..          ', '.#.         ', '.##.        ', '.###.       ', '.####.      ', '.#####.     ',
+  '.######.    ', '.#######.   ', '.########.  ', '.#########. ', '.######.....', '.###.##.    ', '.##. .##.   ',
+  '.#.  .##.   ', '..    .##.  ', '.     .##.  ', '       ..   ', '            ',
+];
+const pointer = { x: 0, y: 0, visible: false, last: 0, enabled: true };
+const hits = []; // clickable rows registered by the menus each frame: { x0, y0, x1, y1, hover, click }
+
+function startMouse() {
+  let dirs = [];
+  try { dirs = fs.readdirSync('/dev/input').filter((n) => /^event\d+$/.test(n)); } catch { return; }
+  for (const n of dirs) {
+    let fd;
+    try { fd = fs.openSync('/dev/input/' + n, 'r'); } catch { continue; }
+    const absMax = { x: 32767, y: 32767 };
+    const stream = fs.createReadStream(null, { fd, highWaterMark: 24 * 64 });
+    let rest = Buffer.alloc(0);
+    stream.on('data', (chunk) => {
+      const buf = Buffer.concat([rest, chunk]);
+      let o = 0;
+      for (; o + 24 <= buf.length; o += 24) {
+        const type = buf.readUInt16LE(o + 16), code = buf.readUInt16LE(o + 18), value = buf.readInt32LE(o + 20);
+        onInput(type, code, value, absMax);
+      }
+      rest = buf.subarray(o);
+    });
+    stream.on('error', () => {});
+  }
+}
+
+function onInput(type, code, value, absMax) {
+  if (!pointer.enabled || !screen) return;
+  const EV_KEY = 1, EV_REL = 2, EV_ABS = 3;
+  if (type === EV_REL && (code === 0 || code === 1)) {
+    if (code === 0) pointer.x = Math.max(0, Math.min(screen.w - 1, pointer.x + value * 1.5));
+    else pointer.y = Math.max(0, Math.min(screen.h - 1, pointer.y + value * 1.5));
+    moved();
+  } else if (type === EV_REL && code === 8) { // wheel
+    onKey(value > 0 ? '\u001b[A' : '\u001b[B');
+  } else if (type === EV_ABS && (code === 0 || code === 1)) { // tablets / QEMU usb-tablet / touch
+    const axis = code === 0 ? 'x' : 'y';
+    if (value > absMax[axis]) absMax[axis] = value > 32767 ? 65535 : value;
+    pointer[axis] = (value / absMax[axis]) * (axis === 'x' ? screen.w : screen.h);
+    moved();
+  } else if (type === EV_KEY && value === 1 && (code === 0x110 || code === 0x14a)) { // BTN_LEFT / BTN_TOUCH
+    pointer.visible = true; pointer.last = Date.now();
+    click();
+  } else if (type === EV_KEY && value === 1 && code === 0x111) { // BTN_RIGHT = back
+    onKey('\u001b');
+  }
+}
+
+function moved() {
+  pointer.visible = true;
+  pointer.last = Date.now();
+  const h = hitAt();
+  if (h?.hover) h.hover();
+}
+function hitAt() {
+  if (!screen) return null;
+  const mx = (pointer.x - screen.offX) / screen.pitch, my = (pointer.y - screen.offY) / screen.pitch;
+  return hits.find((h) => mx >= h.x0 && mx <= h.x1 && my >= h.y0 && my <= h.y1) || null;
+}
+function click() {
+  const h = hitAt();
+  if (h) h.click();
+  else if (state.mode === 'board') openStart(false);
 }
 
 // ---------------------------------------------------------------- output: framebuffer or PNG
@@ -155,8 +256,8 @@ class Screen {
   draw(m) {
     // full repaint every ~2 s in case kernel/console text was printed over the framebuffer
     if (++this.frames % 30 === 0) this.prev = null;
-    const th = currentTheme();
-    if (th !== this.theme) { this.theme = th; this.prev = null; this.frame.fill(0); }
+    const th = currentLook();
+    if (th !== this.look) { this.look = th; this.prev = null; this.frame.fill(0); }
     const { frame, stride, pitch, offX, offY, bpp } = this;
     // LED: round-ish dots with dark gaps; LCD: solid cells without gaps (DB/SBB-style screens)
     const dot = th.style === 'lcd' ? pitch : this.dot;
@@ -183,7 +284,32 @@ class Screen {
       }
     }
     this.prev = Uint8Array.from(m.buf);
+    const under = pointer.visible ? this.drawCursor(put, bytes) : null;
     if (this.fd !== null) fs.writeSync(this.fd, frame, 0, frame.length, 0);
+    if (under) { under.data.copy(frame, 0, 0, 0); this.restoreCursor(under, bytes); }
+  }
+  // arrow sprite drawn on top of the frame, the pixels below are restored after the write
+  drawCursor(put, bytes) {
+    const scale = Math.max(1, Math.round(this.w / 1280));
+    const W = CURSOR[0].length * scale, H = CURSOR.length * scale;
+    const x0 = Math.round(pointer.x), y0 = Math.round(pointer.y);
+    const saved = [];
+    for (let y = 0; y < H; y++) {
+      const py = y0 + y;
+      if (py < 0 || py >= this.h) continue;
+      const row = CURSOR[Math.floor(y / scale)];
+      for (let x = 0; x < W; x++) {
+        const px = x0 + x, ch = row[Math.floor(x / scale)];
+        if (px < 0 || px >= this.w || ch === ' ') continue;
+        const o = py * this.stride + px * bytes;
+        saved.push([o, Buffer.from(this.frame.subarray(o, o + bytes))]);
+        put(o, ch === '#' ? [255, 255, 255] : [0, 0, 0]);
+      }
+    }
+    return { data: Buffer.alloc(0), saved };
+  }
+  restoreCursor(under) {
+    for (const [o, b] of under.saved) b.copy(this.frame, o);
   }
   savePng(file) {
     const { w, h, frame } = this;
@@ -461,6 +587,7 @@ function openStart(withCountdown) {
   items.push({ browse: true, label: 'Vybrat podle kraje, okresu a obce…' });
   items.push({ search: true, label: 'Hledat jinou zastávku…' });
   items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
+  items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
   state.start = { items, sel: 0, until: withCountdown ? Date.now() + START_TIMEOUT : 0 };
   state.mode = 'start';
 }
@@ -555,6 +682,7 @@ function renderBrowse(m, t) {
   if (!items.length) m.text('Nic neodpovídá filtru', 9, y0, 'normal', C.RED);
   items.slice(first, first + rows).forEach((it, i) => {
     const idx = first + i, y = y0 + i * L.rowH, on = idx === b.sel;
+    hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { b.sel = idx; }, click: () => { b.sel = idx; browsePick(it); } });
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     const infoW = textWidth(it.info, 'small');
     m.text(fitText(it.label, 'normal', W - infoW - 18), 9, y, 'normal', on ? C.WHITE : C.AMBER);
@@ -597,6 +725,59 @@ function browseKey(k) {
   else if (k.length === 1 && k >= ' ') { b.filter += k; b.sel = 0; }
 }
 
+// ---------------------------------------------------------------- settings: customise the look
+const SETTINGS = [
+  { key: 'theme', label: 'Vzhled', values: () => THEMES.map((x) => x.id), show: (v) => (THEMES.find((x) => x.id === v) || THEMES[0]).name },
+  { key: 'tint', label: 'Barva textu', values: () => Object.keys(TINT_NAMES), show: (v) => TINT_NAMES[v || 'theme'] },
+  { key: 'style', label: 'Styl bodů', values: () => ['theme', 'led', 'lcd'], show: (v) => ({ theme: 'podle vzhledu', led: 'LED body', lcd: 'LCD plné' })[v || 'theme'] },
+  { key: 'brightness', label: 'Jas', values: () => [100, 85, 70, 55, 40], show: (v) => `${v ?? 100} %` },
+  { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
+];
+function settingValue(it) {
+  return it.key === 'theme' ? currentTheme().id : (state.cfg.custom || {})[it.key];
+}
+function changeSetting(it, step) {
+  const vals = it.values();
+  const cur = settingValue(it);
+  let i = vals.indexOf(cur ?? vals[0]);
+  if (i < 0) i = 0;
+  const next = vals[(i + step + vals.length) % vals.length];
+  if (it.key === 'theme') state.cfg.theme = next;
+  else state.cfg.custom = { ...(state.cfg.custom || {}), [it.key]: next };
+  pointer.enabled = state.cfg.custom?.cursor !== false;
+  if (!pointer.enabled) pointer.visible = false;
+  saveConfig(state.cfg);
+}
+function renderSettings(m, t) {
+  const W = m.cols, L = layout(m);
+  m.text('Nastavení vzhledu', 1, 1, 'big', C.AMBER);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  SETTINGS.forEach((it, i) => {
+    const y = L.headerLine + 6 + i * (L.rowH + 2), on = i === state.setSel;
+    if (on) m.text('>', 2, y, 'normal', C.WHITE);
+    m.text(it.label, 9, y, 'normal', on ? C.WHITE : C.AMBER);
+    const val = '< ' + it.show(settingValue(it)) + ' >';
+    m.textRight(val.replace('< ', '').replace(' >', ''), W - 2, y, 'normal', on ? C.WHITE : C.DIM);
+    hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH, hover: () => { state.setSel = i; }, click: () => { state.setSel = i; changeSetting(it, 1); } });
+  });
+  // live preview strip of the palette
+  const py = L.headerLine + 6 + SETTINGS.length * (L.rowH + 2) + 4;
+  m.text('Ukázka:', 9, py, 'small', C.DIM);
+  let x = 9 + textWidth('Ukázka: ', 'small');
+  for (const [txt, c] of [['22 Nádraží Hostivař', C.AMBER], ['+3 min', C.RED], ['včas', C.GREEN], ['nást. A', C.DIM]]) {
+    x = m.text(txt, x, py, 'small', c) + 8;
+  }
+  m.text('Šipky nahoru/dolů · vlevo/vpravo nebo Enter mění · Esc zpět · klik mění', 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function settingsKey(k) {
+  const it = SETTINGS[state.setSel];
+  if (k === '\u001b[A') state.setSel = Math.max(0, state.setSel - 1);
+  else if (k === '\u001b[B') state.setSel = Math.min(SETTINGS.length - 1, state.setSel + 1);
+  else if (k === '\u001b[C' || k === '\r' || k === ' ') changeSetting(it, 1);
+  else if (k === '\u001b[D') changeSetting(it, -1);
+  else if (k === '\u001b' || k === 'q') openStart(false);
+}
+
 function renderStart(m, t) {
   const W = m.cols, L = layout(m), st = state.start;
   m.text('Kam to dnes bude', 1, 1, 'big', C.AMBER); // no '?': it is a pictogram in the BUSE face
@@ -608,8 +789,9 @@ function renderStart(m, t) {
   st.items.slice(first, first + vis).forEach((it, i) => {
     const idx = first + i, y = L.headerLine + 5 + i * L.rowH, on = idx === st.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
-    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse ? C.DIM : C.AMBER));
-    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
+    hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { st.sel = idx; st.until = 0; }, click: () => { st.sel = idx; pickStart(it); } });
+    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings ? C.DIM : C.AMBER));
+    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
   });
   const left = st.until ? Math.max(0, Math.ceil((st.until - Date.now()) / 1000)) : 0;
   const hint = (left ? `Spustím za ${left} s · ` : '') + 'šipky, Enter, číslo nebo piš';
@@ -623,7 +805,7 @@ function startKey(k) {
   else if (k === '\u001b[B') st.sel = Math.min(st.items.length - 1, st.sel + 1);
   else if (k === '\r') pickStart(st.items[st.sel]);
   else if (k === '\u001b') pickStart(st.items[0]);
-  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse) pickStart(st.items[+k]);
+  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings) pickStart(st.items[+k]);
   else if (k === 't' || k === 'T') {
     cycleTheme(1);
     const it = st.items.find((x) => x.theme);
@@ -634,6 +816,7 @@ function startKey(k) {
 function pickStart(it) {
   if (!it) return;
   if (it.browse) { openBrowse(); return; }
+  if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
   if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
   else chooseStop(it.stop);
@@ -643,6 +826,7 @@ function pickStart(it) {
 function onKey(k) {
   if (state.mode === 'start') return startKey(k);
   if (state.mode === 'browse') return browseKey(k);
+  if (state.mode === 'settings') return settingsKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -687,9 +871,12 @@ let screen, m, t0 = Date.now();
 function tick() {
   const t = Date.now() - t0;
   m.clear();
+  hits.length = 0;
+  if (pointer.visible && Date.now() - pointer.last > 5000) pointer.visible = false;
   if (state.mode === 'start' && state.start.until && Date.now() > state.start.until) pickStart(state.start.items[0]);
   if (state.mode === 'start') renderStart(m, t);
   else if (state.mode === 'browse') renderBrowse(m, t);
+  else if (state.mode === 'settings') renderSettings(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else renderBoard(m, t);
@@ -727,6 +914,8 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
+    if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
+    if (args.includes('--cursor')) { pointer.visible = true; pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
     if (args.includes('--start')) { openStart(true); state.start.until = Date.now() + 14500; }
     tick();
@@ -752,6 +941,9 @@ async function main() {
   const alertsLoop = async () => { try { await refreshAlerts(); } catch (e) { log('alerts: ' + e.message); } setTimeout(alertsLoop, 120000); };
   setTimeout(alertsLoop, 3000);
   setInterval(() => { state.ip = localIp(); if (!state.ip) state.net = 'čekám na síť (DHCP)…'; }, 5000);
+  pointer.enabled = state.cfg.custom?.cursor !== false;
+  pointer.x = screen.w / 2; pointer.y = screen.h / 2;
+  startMouse();
   setInterval(tick, 66);
 }
 
