@@ -67,3 +67,61 @@ module.exports = {
 function kind(type) {
   return { tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', subway: 'Metro', train: 'Zug', rail: 'Zug', ferry: 'Schiff' }[type] || '';
 }
+
+// ---------------------------------------------------------------- native (vector) version
+// SBB platform/hall screen: corporate blue, white text, line in a white box, red delays,
+// rotating "Abfahrt / Départ / Partenza" heading. Lato (OFL) as a free stand-in for SBB's Frutiger.
+const SB = { blue: [45, 50, 125], white: [255, 255, 255], dim: [176, 182, 226], red: [255, 70, 60], line: [96, 102, 170] };
+const FS = { reg: 'Lato-Regular', bold: 'Lato-Bold' };
+
+function nativeSBB(c, t, api) {
+  const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
+  const s = c.h / 720, W = c.w, x0 = 36 * s, x1 = W - 36 * s;
+  c.clear(SB.blue);
+  const head = ['Odjezd', 'Abfahrt', 'Départ', 'Partenza'][Math.floor(t / 4000) % 4];
+  c.text(head, x0, 74 * s, { font: FS.bold, size: 58 * s, color: SB.white });
+  const now = new Date();
+  c.text(`${hhmm(now)}:${api.pad2(now.getSeconds())}`, x1, 60 * s, { font: FS.bold, size: 38 * s, color: SB.white, align: 'right' });
+  c.text(stopLabel(state.cfg.stop), x1, 92 * s, { font: FS.reg, size: 22 * s, color: SB.dim, align: 'right', maxW: W / 2 });
+  c.hline(0, W, 112 * s, SB.white, Math.max(1, 3 * s));
+
+  const deps = api.upcoming();
+  if (!deps.length) {
+    c.text(state.lastOk ? 'Keine Abfahrten' : state.error ? 'Nelze načíst odjezdy' : 'Načítám odjezdy…', x0, 210 * s, { font: FS.bold, size: 36 * s, color: SB.white });
+    c.text(api.statusText(), x0, 250 * s, { font: FS.reg, size: 20 * s, color: SB.dim, maxW: x1 - x0 });
+    return;
+  }
+  const urban = deps.slice(0, 20).filter((d) => d.type === 'train' || d.type === 'rail').length < Math.min(deps.length, 20) / 2;
+  const top = 130 * s, rowH = 94 * s;
+  const per = Math.max(1, Math.floor((c.h - top - 30 * s) / rowH));
+  const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)), pg = Math.floor(t / 7000) % pages;
+  const badgeW = 118 * s, colTime = x0 + badgeW + 24 * s, colDest = colTime + 120 * s, platW = 110 * s;
+  deps.slice(pg * per, pg * per + per).forEach((d, i) => {
+    const y = top + i * rowH;
+    // line / train in a white box with blue text
+    const label = String(urban ? d.line : d.train || d.line);
+    c.roundRect(x0, y + 14 * s, badgeW, 44 * s, 4 * s, SB.white);
+    // shrink long train numbers ("Os 28018") to fit the box instead of cutting them
+    const fs28 = Math.min(28 * s, (28 * s * (badgeW - 14 * s)) / Math.max(1, c.measure(label, FS.bold, 28 * s)));
+    c.text(label, x0 + badgeW / 2, y + 36 * s + fs28 * 0.36, { font: FS.bold, size: fs28, color: SB.blue, align: 'center' });
+    const mins = minutesTo(d);
+    const when = urban ? (mins <= 0 ? 'jetzt' : mins < 60 ? `${mins}'` : hhmm(new Date(depTime(d)))) : hhmm(new Date(d.plannedTime));
+    c.text(when, colTime, y + 48 * s, { font: FS.bold, size: 34 * s, color: urban && mins <= 0 ? SB.red : SB.white });
+    if (!urban && d.delayMinutes > 0) c.text(`+${d.delayMinutes}'`, colTime, y + 78 * s, { font: FS.bold, size: 22 * s, color: SB.red });
+    c.text(d.cancelled ? `${d.destination} — fällt aus` : d.destination, colDest, y + 48 * s, { font: FS.bold, size: 34 * s, color: d.cancelled ? SB.red : SB.white, maxW: x1 - colDest - platW - 20 * s });
+    const n = depNotice(d);
+    const sub = n ? n.text : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || '') + (d.provider ? ` · ${d.provider}` : '');
+    c.text(sub, colDest, y + 78 * s, { font: n ? FS.bold : FS.reg, size: 20 * s, color: n ? SB.red : SB.dim, maxW: x1 - colDest - platW - 20 * s });
+    const plat = platformOf(d);
+    if (plat) {
+      c.text(plat, x1, y + 48 * s, { font: FS.bold, size: 34 * s, color: SB.white, align: 'right' });
+      c.text(d.type === 'train' ? 'Gleis' : 'Kante', x1, y + 76 * s, { font: FS.reg, size: 18 * s, color: SB.dim, align: 'right' });
+    }
+    c.hline(x0, x1, y + rowH - 4 * s, SB.line);
+  });
+  if (pages > 1) c.text(`${pg + 1}/${pages}`, x1, c.h - 12 * s, { font: FS.reg, size: 16 * s, color: SB.dim, align: 'right' });
+  c.text(api.statusText(), x0, c.h - 12 * s, { font: FS.reg, size: 16 * s, color: SB.dim, maxW: x1 - x0 - 80 * s });
+}
+
+module.exports.renderNative = nativeSBB;
+module.exports.nativeFont = FS.bold;

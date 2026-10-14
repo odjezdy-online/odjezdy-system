@@ -151,6 +151,40 @@ class Canvas {
     }
   }
   hline(x0, x1, y, col, thick = 1) { this.rect(x0, y, x1 - x0, thick, col); }
+  // "LED screen" filter: the vector image is averaged per pitch×pitch cell and redrawn as round dots
+  // (brightness kept, so glyph edges stay smooth like browser-rendered text, just made of LEDs).
+  dotScreen(pitch, { bg = [0, 0, 0], off = [16, 10, 4], radius = 0.42 } = {}) {
+    const { w, h, rgb } = this;
+    const cols = Math.floor(w / pitch), rows = Math.floor(h / pitch);
+    const avg = new Float32Array(cols * rows * 3);
+    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+      let r = 0, g = 0, b = 0;
+      for (let y = cy * pitch; y < cy * pitch + pitch; y++) for (let x = cx * pitch; x < cx * pitch + pitch; x++) {
+        const o = (y * w + x) * 3; r += rgb[o]; g += rgb[o + 1]; b += rgb[o + 2];
+      }
+      const n = pitch * pitch, i = (cy * cols + cx) * 3;
+      avg[i] = r / n; avg[i + 1] = g / n; avg[i + 2] = b / n;
+    }
+    this.clear(bg);
+    const rad = pitch * radius, c0 = (pitch - 1) / 2;
+    // precomputed anti-aliased dot mask
+    const mask = new Float32Array(pitch * pitch);
+    for (let y = 0; y < pitch; y++) for (let x = 0; x < pitch; x++) {
+      const d = Math.hypot(x - c0, y - c0) - rad;
+      mask[y * pitch + x] = d <= -0.5 ? 1 : d >= 0.5 ? 0 : 0.5 - d;
+    }
+    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+      const i = (cy * cols + cx) * 3;
+      // lit dots take the cell colour (boosted so a half-covered cell still glows), dark ones the "off" tint
+      const lum = Math.max(avg[i] - bg[0], avg[i + 1] - bg[1], avg[i + 2] - bg[2]) / 255;
+      const k = Math.min(1, lum * 1.6);
+      const col = [0, 1, 2].map((c) => off[c] + (Math.min(255, avg[i + c] * (k > 0 ? 1 / Math.max(lum, 0.35) : 0)) - off[c]) * k);
+      for (let y = 0; y < pitch; y++) for (let x = 0; x < pitch; x++) {
+        const a = mask[y * pitch + x];
+        if (a) this.blend(cx * pitch + x, cy * pitch + y, col.map(Math.round), Math.round(a * 255));
+      }
+    }
+  }
   measure(str, font, size) {
     const f = findFont(font);
     return f ? f.getAdvanceWidth(String(str), size, { kerning: true }) : String(str).length * size * 0.55;
