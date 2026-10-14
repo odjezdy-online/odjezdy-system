@@ -1,0 +1,10 @@
+
+  Odjezdy OS (Alpine Linux)
+  ---------------------------------------------------------------
+  Tabule běží na tty1 (Alt+F1). Tady jsi na servisní konzoli.
+
+  Restart tabule:      kill $(pidof node)   (init ji hned spustí znovu)
+  Konfigurace:         /etc/odjezdy/config.json
+  Log:                 /tmp/odjezdy.log
+  Uložit změny trvale: lbu commit  (potřebuje zapisovatelné médium)
+

@@ -1,0 +1,4 @@
+alpine/cache/
+alpine/out/
+node_modules/
+*.ppm
