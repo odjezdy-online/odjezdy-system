@@ -13,7 +13,9 @@ Počítač (VM, starý notebook, mini-PC u monitoru) nabootuje rovnou do **LED o
 | [`alpine/`](alpine/README.md): **live ISO** | hotové, bootuje v QEMU | Rychle vyzkoušet. Běží z RAM (~380 MB ISO, 1 GB RAM), nic neinstaluje. |
 | `arch/`: **plnohodnotný OS s instalátorem** | ve vývoji | Normální Arch Linux (pacman, systemd), instalace na disk, GUI tabule jako hlavní rozhraní. |
 
-Obě varianty používají stejnou aplikaci z [`app/`](app/). Tabule kreslí body přímo do framebufferu (`/dev/fb0`), bez X serveru a bez prohlížeče.
+Obě varianty používají stejnou aplikaci z [`app/`](app/). Tabule kreslí přímo do framebufferu (`/dev/fb0`), bez X serveru a bez prohlížeče:
+- **LED vzhledy** (BUSE, UK, RATP, JR) rozsvěcují body mřížky jako skutečné LED panely, s bitmapovými písmy.
+- **LCD vzhledy** (DB) kreslí v plném rozlišení vyhlazeným písmem z TTF, stejně jako normální GUI (vlastní rasterizér nad opentype.js).
 
 ## Vzhledy tabulí
 
@@ -69,6 +71,8 @@ cd app && node board.js --png out.png --theme db
 - Odjezdy, výluky a zastávky v Česku: [odjezdy.online](https://app.odjezdy.online) (PID, DÚK, IDSJMK, ODIS, CIS JŘ a další).
 - Zastávky ve světě a čísla vlaků: [Transitous](https://transitous.org) (MOTIS 2 API, komunitní služba pro open-source a nekomerční projekty). **Zdroje dat: [transitous.org/sources](https://transitous.org/sources/)**, tabule je uvádí ve stavovém řádku. Transitous využívá i data © přispěvatelů OpenStreetMap.
 - BUSE font: `/cedulomat/font.fnt` z odjezdy.online, formát z OMSI BUSE TOOL.
+- Písma pro zahraniční vzhledy (SIL Open Font License 1.1, Google Fonts): **Fira Sans** a **Lato** jako TTF v `app/fonts/ttf/` (licence vedle souborů), **Inter**, **Source Sans 3**, **Barlow Condensed** a **DotGothic16** převedené do LED bitmap (`app/fonts/*.json`, `tools/fontgen.js`).
+- [opentype.js](https://opentype.js.org) 1.3.4 (MIT) v `app/vendor/`: čtení TTF pro vektorové LCD vzhledy.
 - Obce, okresy a kraje: číselníky ČSÚ se souřadnicemi obcí (souradnice.csv z [33bcdd/souradnice-mest](https://github.com/33bcdd/souradnice-mest)). V repu je jen odvozené přiřazení zastávek.
 
 ## Licence

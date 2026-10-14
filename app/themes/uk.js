@@ -30,6 +30,8 @@ const ORD = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10t
 module.exports = {
   id: 'uk',
   name: 'UK National Rail',
+  // Barlow Condensed (OFL) for the dot-matrix text; small labels stay in the BUSE small face
+  fonts: { normal: 'barlowc', big: 'barlowc' },
   style: 'led',
   background: [0, 0, 0],
   unlit: [22, 14, 0],

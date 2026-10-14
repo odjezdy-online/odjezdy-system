@@ -5,6 +5,7 @@ const { paginate, emptyMessage, clockText } = require('./_util');
 module.exports = {
   id: 'ratp',
   name: 'RATP SIEL (Paříž)',
+  fonts: 'barlowc', // app/fonts/barlowc.json (OFL, tools/fontgen.js)
   style: 'led',
   background: [0, 0, 0],
   unlit: [20, 12, 0],

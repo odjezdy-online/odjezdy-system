@@ -19,6 +19,19 @@ function monitor(cmds) {
   });
 }
 
+function qmp(cmds) {
+  return new Promise((resolve, reject) => {
+    const s = net.connect(4445, '127.0.0.1');
+    let out = '';
+    s.on('data', (d) => (out += d));
+    s.on('error', reject);
+    s.on('connect', async () => {
+      for (const c of cmds) { s.write(JSON.stringify(c) + '\n'); await new Promise((r) => setTimeout(r, 150)); }
+      setTimeout(() => { s.destroy(); resolve(out.trim().split('\n').slice(-1)[0]); }, 300);
+    });
+  });
+}
+
 function ppmToPng(ppm, png) {
   const buf = fs.readFileSync(ppm);
   const header = buf.toString('latin1', 0, 64).match(/^P6\s+(\d+)\s+(\d+)\s+(\d+)\s/);
@@ -60,6 +73,20 @@ const KEYMAP = {
     }
     await monitor(cmds);
     console.log(`sent ${cmds.length} keys`);
+  } else if (cmd === 'pointer') {
+    // node vmctl.js pointer <x 0..1> <y 0..1> [click]  — absolute tablet event via QMP
+    // (HMP mouse_move does not reach the guest with -display none). Needs -qmp tcp:127.0.0.1:4445,server,nowait
+    const [fx, fy, click] = rest;
+    const ev = [
+      { type: 'abs', data: { axis: 'x', value: Math.round(Number(fx) * 32767) } },
+      { type: 'abs', data: { axis: 'y', value: Math.round(Number(fy) * 32767) } },
+    ];
+    const cmds = [{ execute: 'qmp_capabilities' }, { execute: 'input-send-event', arguments: { events: ev } }];
+    if (click) {
+      cmds.push({ execute: 'input-send-event', arguments: { events: [{ type: 'btn', data: { down: true, button: click === 'right' ? 'right' : 'left' } }] } });
+      cmds.push({ execute: 'input-send-event', arguments: { events: [{ type: 'btn', data: { down: false, button: click === 'right' ? 'right' : 'left' } }] } });
+    }
+    console.log(await qmp(cmds));
   } else {
     console.log(await monitor([rest.join(' ') || 'info status']));
   }

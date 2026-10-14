@@ -24,12 +24,32 @@ const args = process.argv.slice(2);
 const PNG_OUT = args.includes('--png') ? args[args.indexOf('--png') + 1] : null;
 
 // ---------------------------------------------------------------- fonts
+// BUSE panel faces (small/normal/big/line) + extra families in app/fonts/<id>.json (tools/fontgen.js),
+// registered as "<id>-small", "<id>-normal", "<id>-big". A theme picks a family with `fonts: '<id>'`.
 const FONTS = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'font.json'), 'utf8'));
+try {
+  for (const f of fs.readdirSync(path.join(APP_DIR, 'fonts')).filter((n) => n.endsWith('.json'))) {
+    const fam = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'fonts', f), 'utf8'));
+    for (const size of ['small', 'normal', 'big']) if (fam[size]) FONTS[`${f.replace(/\.json$/, '')}-${size}`] = fam[size];
+  }
+} catch {}
 for (const f of Object.values(FONTS)) {
   for (const [ch, [w, rows]] of Object.entries(f.glyphs)) {
     f.glyphs[ch] = { w, bits: rows.map((h) => (h === '0' ? 0n : BigInt('0x' + h))) };
   }
 }
+const FONT_FAMILIES = [...new Set(Object.keys(FONTS).filter((k) => /-(small|normal|big)$/.test(k)).map((k) => k.replace(/-(small|normal|big)$/, '')))];
+const FONT_NAMES = {};
+try { for (const id of FONT_FAMILIES) FONT_NAMES[id] = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'fonts', id + '.json'), 'utf8')).family; } catch {}
+// face lookup honouring the current theme's font family ('line' always stays BUSE)
+let faceFamily = null;
+function face(size) {
+  // a theme sets `fonts: 'inter'` (all sizes) or per size `fonts: { normal: 'dotgothic', big: 'dotgothic' }`
+  const fam = faceFamily && typeof faceFamily === 'object' ? faceFamily[size] : faceFamily;
+  return (fam && size !== 'line' && FONTS[`${fam}-${size}`]) || FONTS[size] || FONTS.normal;
+}
+// what themes see as api.FONTS: same keys, resolved through the theme family
+const FONT_VIEW = new Proxy({}, { get: (_, k) => face(String(k)) });
 const stripAccents = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 // characters the BUSE faces lack (international data from Transitous, typographic dashes/quotes);
 // '?' itself is a pictogram in BUSE, so unknown characters fall back to a space-ish dot instead
@@ -42,7 +62,7 @@ function glyphOf(font, ch) {
   return font.glyphs[ch] || font.glyphs[TRANSLIT[ch]] || font.glyphs[stripAccents(ch)] || font.glyphs['.'] || font.glyphs['?'];
 }
 function textWidth(str, size) {
-  const f = FONTS[size];
+  const f = face(size);
   let w = 0;
   for (const ch of str) w += glyphOf(f, ch).w + f.spacing;
   return Math.max(0, w - f.spacing);
@@ -64,7 +84,7 @@ class Matrix {
   set(x, y, c = 1) { if (x >= 0 && y >= 0 && x < this.cols && y < this.rows) this.buf[y * this.cols + x] = c; }
   hline(x0, x1, y, c = 2) { for (let x = x0; x <= x1; x++) this.set(x, y, c); }
   text(str, x, y, size = 'normal', c = 1, clipX0 = 0, clipX1 = this.cols - 1) {
-    const f = FONTS[size];
+    const f = face(size);
     for (const ch of str) {
       const g = glyphOf(f, ch);
       if (x > clipX1) break;
@@ -162,6 +182,10 @@ function currentTheme() {
   return THEMES.find((th) => th.id === state.cfg?.theme) || THEMES[0];
 }
 
+// ---------------------------------------------------------------- native (vector) rendering for LCD themes
+let vector = null;
+try { vector = require('./vector.js'); } catch (e) { log('vector renderer unavailable: ' + e.message); }
+
 // ---------------------------------------------------------------- mouse pointer (evdev)
 // 12x19 arrow: '#' white, '.' black outline, ' ' transparent
 const CURSOR = [
@@ -173,24 +197,32 @@ const pointer = { x: 0, y: 0, visible: false, last: 0, enabled: true };
 const hits = []; // clickable rows registered by the menus each frame: { x0, y0, x1, y1, hover, click }
 
 function startMouse() {
-  let dirs = [];
-  try { dirs = fs.readdirSync('/dev/input').filter((n) => /^event\d+$/.test(n)); } catch { return; }
-  for (const n of dirs) {
+  // Only pointing devices (mice, tablets, touchscreens): /proc/bus/input/devices lists a "mouseN"
+  // handler for them. Keyboards stay on the TTY.
+  let devs = [];
+  try {
+    devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/)
+      .filter((b) => /H: Handlers=.*\bmouse\d/.test(b) || /N: Name=.*touch/i.test(b))
+      .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
+  } catch { return; }
+  // Non-blocking reads polled from a timer: a blocking read per device would occupy one of the
+  // 4 libuv threadpool threads forever, starving DNS lookups (getaddrinfo) and other fs work.
+  const buf = Buffer.alloc(24 * 64);
+  for (const n of devs) {
     let fd;
-    try { fd = fs.openSync('/dev/input/' + n, 'r'); } catch { continue; }
+    try { fd = fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK); } catch (e) { log(`input ${n}: ${e.code}`); continue; }
+    log(`input ${n}: listening`);
     const absMax = { x: 32767, y: 32767 };
-    const stream = fs.createReadStream(null, { fd, highWaterMark: 24 * 64 });
-    let rest = Buffer.alloc(0);
-    stream.on('data', (chunk) => {
-      const buf = Buffer.concat([rest, chunk]);
-      let o = 0;
-      for (; o + 24 <= buf.length; o += 24) {
-        const type = buf.readUInt16LE(o + 16), code = buf.readUInt16LE(o + 18), value = buf.readInt32LE(o + 20);
-        onInput(type, code, value, absMax);
+    setInterval(() => {
+      for (;;) {
+        let len;
+        try { len = fs.readSync(fd, buf, 0, buf.length, null); } catch (e) { if (e.code !== 'EAGAIN') log(`input ${n}: ${e.code}`); return; }
+        if (!len) return;
+        for (let o = 0; o + 24 <= len; o += 24) {
+          onInput(buf.readUInt16LE(o + 16), buf.readUInt16LE(o + 18), buf.readInt32LE(o + 20), absMax);
+        }
       }
-      rest = buf.subarray(o);
-    });
-    stream.on('error', () => {});
+    }, 15);
   }
 }
 
@@ -299,9 +331,28 @@ class Screen {
     if (this.fd !== null) fs.writeSync(this.fd, frame, 0, frame.length, 0);
     if (under) { under.data.copy(frame, 0, 0, 0); this.restoreCursor(under, bytes); }
   }
+  // native mode: copy an RGB canvas (vector theme) into the framebuffer format
+  drawCanvas(cv) {
+    const { frame, stride, bpp } = this;
+    const bytes = bpp / 8, rgb = cv.rgb;
+    for (let y = 0; y < this.h; y++) {
+      let o = y * stride, i = y * this.w * 3;
+      for (let x = 0; x < this.w; x++, o += bytes, i += 3) {
+        if (bytes === 4) { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; frame[o + 3] = 255; }
+        else if (bytes === 2) frame.writeUInt16LE(((rgb[i] >> 3) << 11) | ((rgb[i + 1] >> 2) << 5) | (rgb[i + 2] >> 3), o);
+        else { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; }
+      }
+    }
+    this.prev = null; // the LED path must repaint everything next time
+    this.look = null;
+    const put = (o, col) => { frame[o] = col[2]; frame[o + 1] = col[1]; frame[o + 2] = col[0]; if (bytes === 4) frame[o + 3] = 255; };
+    const under = pointer.visible ? this.drawCursor(put, bytes) : null;
+    if (this.fd !== null) fs.writeSync(this.fd, frame, 0, frame.length, 0);
+    if (under) this.restoreCursor(under, bytes);
+  }
   // arrow sprite drawn on top of the frame, the pixels below are restored after the write
   drawCursor(put, bytes) {
-    const scale = Math.max(1, Math.round(this.w / 1280));
+    const scale = Math.max(1, Math.round(this.w / 900)); // 2x from ~1280 px wide
     const W = CURSOR[0].length * scale, H = CURSOR.length * scale;
     const x0 = Math.round(pointer.x), y0 = Math.round(pointer.y);
     const saved = [];
@@ -323,6 +374,14 @@ class Screen {
     for (const [o, b] of under.saved) b.copy(this.frame, o);
   }
   savePng(file) {
+    const bytes = this.bpp / 8;
+    const under = pointer.visible
+      ? this.drawCursor((o, col) => { this.frame[o] = col[2]; this.frame[o + 1] = col[1]; this.frame[o + 2] = col[0]; }, bytes)
+      : null;
+    this.encodePng(file);
+    if (under) this.restoreCursor(under);
+  }
+  encodePng(file) {
     const { w, h, frame } = this;
     const raw = Buffer.alloc((w * 3 + 1) * h);
     for (let y = 0; y < h; y++) {
@@ -538,7 +597,7 @@ function depNotice(d) {
 }
 
 // every glyph present in that face (no accent-stripping / '?' fallback)
-const faceCovers = (size, str) => [...str].every((ch) => FONTS[size].glyphs[ch]);
+const faceCovers = (size, str) => [...str].every((ch) => face(size).glyphs[ch]);
 
 function localIp() {
   for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) if (a.family === 'IPv4' && !a.internal) return a.address;
@@ -551,7 +610,7 @@ const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
 // layout metrics come from the BUSE font (normal/small 10 rows, big 19 rows)
 function layout(m) {
-  const big = FONTS.big.rows, nor = FONTS.normal.rows, sm = FONTS.small.rows;
+  const big = face('big').rows, nor = face('normal').rows, sm = face('small').rows;
   const headerLine = big + 2;
   const colHead = headerLine + 2;
   const top = colHead + sm + 3;
@@ -559,6 +618,51 @@ function layout(m) {
   const footerH = nor + 4;
   const nRows = Math.max(1, Math.floor((m.rows - top - footerH - 1) / rowH));
   return { big, nor, sm, headerLine, colHead, top, rowH, footerH, nRows };
+}
+
+// LCD themes with renderNative() draw at full resolution with anti-aliased TrueType text
+let nativeCanvas = null, lastNative = 0;
+function renderNativeBoard(t) {
+  const th = currentTheme();
+  if (!vector || typeof th.renderNative !== 'function' || state.cfg.custom?.style === 'led') return false;
+  if (state.cfg.custom?.font && state.cfg.custom.font !== 'theme') return false; // user forced an LED font
+  // 5 fps is plenty for a static board (clock seconds, marquee); the cursor still moves at tick rate
+  if (Date.now() - lastNative < 180 && !pointer.visible) return true;
+  lastNative = Date.now();
+  if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
+  try {
+    th.renderNative(nativeCanvas, t, themeApi);
+    if (state.cfg.custom?.disruptions !== false) nativeDisruption(nativeCanvas, t, th);
+    if (state.toast && Date.now() < state.toast.until) {
+      const c = nativeCanvas, s = c.h / 720, w = c.measure(state.toast.text, 'FiraSans-Bold', 28 * s) + 60 * s;
+      c.roundRect((c.w - w) / 2, c.h / 2 - 32 * s, w, 64 * s, 10 * s, [255, 255, 255]);
+      c.text(state.toast.text, c.w / 2, c.h / 2 + 10 * s, { font: 'FiraSans-Bold', size: 28 * s, color: [20, 20, 40], align: 'center' });
+    }
+  } catch (e) { log('native render: ' + e.stack); return false; }
+  screen.drawCanvas(nativeCanvas);
+  return true;
+}
+function nativeDisruption(c, t, th) {
+  const list = currentDisruptions();
+  if (!list.length) return;
+  const PERIOD = 40000, SHOW = 9000, phase = t % PERIOD;
+  if (phase > SHOW) return;
+  const text = list[Math.floor(t / PERIOD) % list.length];
+  if (typeof th.renderAlertNative === 'function') return th.renderAlertNative(c, t, themeApi, text);
+  const s = c.h / 720, font = th.nativeFont || 'FiraSans-Bold';
+  const words = String(text).split(/\s+/), lines = [];
+  let cur = '';
+  for (const w of words) {
+    const n = cur ? cur + ' ' + w : w;
+    if (c.measure(n, font, 30 * s) > c.w - 160 * s && cur) { lines.push(cur); cur = w; } else cur = n;
+  }
+  if (cur) lines.push(cur);
+  const shown = lines.slice(0, 5), h = 110 * s + shown.length * 42 * s;
+  const y0 = (c.h - h) / 2;
+  c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
+  c.rect(60 * s, y0, 14 * s, h, [236, 0, 22]);
+  c.text('Mimořádnost', 110 * s, y0 + 62 * s, { font, size: 40 * s, color: [236, 0, 22] });
+  shown.forEach((l, i) => c.text(l, 110 * s, y0 + 112 * s + i * 42 * s, { font: font.replace('Bold', 'Regular'), size: 30 * s, color: [20, 20, 40] }));
 }
 
 function renderBoard(m, t) {
@@ -615,7 +719,7 @@ function renderDisruption(m, t) {
   const text = list[Math.floor(t / PERIOD) % list.length];
   const th = currentTheme();
   if (typeof th.renderAlert === 'function') { th.renderAlert(m, t, themeApi, text); return true; }
-  const W = m.cols, big = FONTS.big.rows, nor = FONTS.normal.rows;
+  const W = m.cols, big = face('big').rows, nor = face('normal').rows;
   const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.floor((m.rows - big - 30) / (nor + 3))));
   const h = big + 10 + lines.length * (nor + 3) + 6;
   const y0 = Math.max(0, Math.floor((m.rows - h) / 2));
@@ -629,7 +733,8 @@ function renderDisruption(m, t) {
   return true;
 }
 const themeApi = {
-  state, C, FONTS, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
+  vector: () => vector,
+  state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
 };
 
@@ -670,9 +775,9 @@ function renderSetup(m, t) {
 
 function renderSplash(m, t) {
   const cy = Math.floor(m.rows / 2);
-  m.textCenter('Odjezdy OS', cy - FONTS.big.rows - 2, 'big', C.AMBER);
+  m.textCenter('Odjezdy OS', cy - face('big').rows - 2, 'big', C.AMBER);
   m.textCenter(state.net, cy + 3, 'normal', C.DIM);
-  m.textCenter('.'.repeat(1 + (Math.floor(t / 400) % 3)), cy + 3 + FONTS.normal.rows + 3, 'normal', C.AMBER);
+  m.textCenter('.'.repeat(1 + (Math.floor(t / 400) % 3)), cy + 3 + face('normal').rows + 3, 'normal', C.AMBER);
 }
 
 // ---------------------------------------------------------------- start menu (shown after every boot)
@@ -833,6 +938,7 @@ function browseKey(k) {
 // ---------------------------------------------------------------- settings: customise the look
 const SETTINGS = [
   { key: 'theme', label: 'Vzhled', values: () => THEMES.map((x) => x.id), show: (v) => (THEMES.find((x) => x.id === v) || THEMES[0]).name },
+  { key: 'font', label: 'Písmo', values: () => ['theme', 'buse', ...FONT_FAMILIES], show: (v) => (!v || v === 'theme' ? 'podle vzhledu' : v === 'buse' ? 'BUSE' : FONT_NAMES[v] || v) },
   { key: 'tint', label: 'Barva textu', values: () => Object.keys(TINT_NAMES), show: (v) => TINT_NAMES[v || 'theme'] },
   { key: 'style', label: 'Styl bodů', values: () => ['theme', 'led', 'lcd'], show: (v) => ({ theme: 'podle vzhledu', led: 'LED body', lcd: 'LCD plné' })[v || 'theme'] },
   { key: 'brightness', label: 'Jas (procenta)', values: () => [100, 85, 70, 55, 40], show: (v) => String(v ?? 100) }, // '%' is a BUSE pictogram
@@ -858,8 +964,10 @@ function renderSettings(m, t) {
   const W = m.cols, L = layout(m);
   m.text('Nastavení vzhledu', 1, 1, 'big', C.AMBER);
   m.hline(0, W - 1, L.headerLine, C.DIM);
+  // spacing adapts to the theme font size so the list never runs into the hint line
+  const step = Math.min(L.rowH + 2, Math.floor((m.rows - (L.headerLine + 6) - L.sm - 6) / (SETTINGS.length + 1)));
   SETTINGS.forEach((it, i) => {
-    const y = L.headerLine + 6 + i * (L.rowH + 2), on = i === state.setSel;
+    const y = L.headerLine + 6 + i * step, on = i === state.setSel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     m.text(it.label, 9, y, 'normal', on ? C.WHITE : C.AMBER);
     const val = '< ' + it.show(settingValue(it)) + ' >';
@@ -867,11 +975,13 @@ function renderSettings(m, t) {
     hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH, hover: () => { state.setSel = i; }, click: () => { state.setSel = i; changeSetting(it, 1); } });
   });
   // live preview strip of the palette
-  const py = L.headerLine + 6 + SETTINGS.length * (L.rowH + 2) + 4;
-  m.text('Ukázka:', 9, py, 'small', C.DIM);
-  let x = 9 + textWidth('Ukázka: ', 'small');
-  for (const [txt, c] of [['22 Nádraží Hostivař', C.AMBER], ['+3 min', C.RED], ['včas', C.GREEN], ['nást. A', C.DIM]]) {
-    x = m.text(txt, x, py, 'small', c) + 8;
+  const py = L.headerLine + 6 + SETTINGS.length * step + 2;
+  if (py + L.sm < m.rows - L.sm - 4) { // live preview of the palette, when there is room
+    m.text('Ukázka:', 9, py, 'small', C.DIM);
+    let x = 9 + textWidth('Ukázka: ', 'small');
+    for (const [txt, c] of [['22 Nádraží Hostivař', C.AMBER], ['+3 min', C.RED], ['včas', C.GREEN], ['nást. A', C.DIM]]) {
+      x = m.text(txt, x, py, 'small', c) + 8;
+    }
   }
   m.text('Šipky nahoru/dolů · vlevo/vpravo nebo Enter mění · Esc zpět · klik mění', 2, m.rows - L.sm - 1, 'small', C.DIM);
 }
@@ -898,7 +1008,8 @@ function worldSearch() {
       if (state.world !== w || w.query !== q) return;
       w.results = (j || []).slice(0, 12).map((x) => ({
         name: x.name, ids: [x.id], source: 'transitous',
-        city: (x.areas || []).map((a) => a.name).filter((n) => n && n !== x.name).slice(-1)[0] || x.country || '',
+        // the geocoder flags the meaningful place ("Wien") as default; fall back to the municipality level
+        city: ((x.areas || []).find((a) => a.default) || (x.areas || []).filter((a) => a.adminLevel <= 8).slice(-1)[0] || {}).name || '',
         country: x.country || '',
       }));
       w.sel = 0; w.err = null;
@@ -923,8 +1034,8 @@ function renderWorld(m, t) {
     const y = ry + (w.busy || w.err ? L.rowH : 0) + i * L.rowH, on = i === w.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     const info = [s.city, s.country].filter(Boolean).join(' · ');
-    m.text(fitText(s.name, 'normal', W - textWidth(info, 'small') - 18), 9, y, 'normal', on ? C.WHITE : C.AMBER);
-    m.textRight(fitText(info, 'small', W / 2), W - 2, y, 'small', C.DIM);
+    m.text(fitText(s.name, 'normal', W - Math.min(textWidth(info, 'small'), Math.floor(W * 0.4)) - 18), 9, y, 'normal', on ? C.WHITE : C.AMBER);
+    m.textRight(fitText(info, 'small', Math.floor(W * 0.4)), W - 2, y, 'small', C.DIM);
     hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { w.sel = i; }, click: () => chooseStop(s) });
   });
   m.text('Data: transitous.org/sources · Šipky, Enter · Esc zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
@@ -1033,10 +1144,29 @@ function kick() {
 }
 
 let screen, m, t0 = Date.now();
+// The framebuffer is shared by all virtual consoles: after Alt+F2 the board must stop painting,
+// otherwise it would draw over the service console. Our console is the one we started on (tty1).
+let vtCheckAt = 0, vtActive = true;
+const OWN_VT = (() => { try { return fs.readlinkSync('/proc/self/fd/0').replace('/dev/', ''); } catch { return 'tty1'; } })();
+function ownVtActive() {
+  if (PNG_OUT) return true;
+  if (Date.now() - vtCheckAt > 400) {
+    vtCheckAt = Date.now();
+    let now = vtActive;
+    try { now = fs.readFileSync('/sys/class/tty/tty0/active', 'utf8').trim() === OWN_VT; } catch { now = true; }
+    if (now && !vtActive && screen) { screen.prev = null; screen.look = null; lastNative = 0; } // repaint on return
+    vtActive = now;
+  }
+  return vtActive;
+}
+
 function tick() {
+  if (!ownVtActive()) return;
   const t = Date.now() - t0;
   m.clear();
   hits.length = 0;
+  const userFont = state.cfg.custom?.font;
+  faceFamily = userFont && userFont !== 'theme' ? (userFont === 'buse' ? null : userFont) : currentTheme().fonts || null;
   if (pointer.visible && Date.now() - pointer.last > 5000) pointer.visible = false;
   if (state.mode === 'start' && state.start.until && Date.now() > state.start.until) pickStart(state.start.items[0]);
   if (state.mode === 'start') renderStart(m, t);
@@ -1045,6 +1175,7 @@ function tick() {
   else if (state.mode === 'world') renderWorld(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
+  else if (renderNativeBoard(t)) return;
   else renderBoard(m, t);
   if (state.toast && Date.now() < state.toast.until) { // short confirmation box (theme switch)
     const w = textWidth(state.toast.text, 'normal') + 8, x0 = Math.floor((m.cols - w) / 2), y0 = Math.floor(m.rows / 2) - 8;
@@ -1082,7 +1213,7 @@ async function main() {
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 4000; }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
-    if (args.includes('--cursor')) { pointer.visible = true; pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
+    if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
     if (args.includes('--start')) { openStart(true); state.start.until = Date.now() + 14500; }
     tick();

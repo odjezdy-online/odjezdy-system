@@ -8,6 +8,8 @@ const SBB_BLUE = [45, 50, 125];
 module.exports = {
   id: 'sbb',
   name: 'SBB (Švýcarsko)',
+  // Source Sans 3 (OFL) for the main text; its 11-row cut is rough, so small labels stay BUSE
+  fonts: { normal: 'sourcesans', big: 'sourcesans' },
   style: 'lcd',
   background: SBB_BLUE,
   unlit: SBB_BLUE,

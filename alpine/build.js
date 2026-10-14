@@ -163,9 +163,11 @@ function buildApkovl() {
     else addFile(rel, fs.readFileSync(f.full), /\.(sh|start)$/.test(rel) || rel.includes('/init.d/') ? 0o755 : 0o644);
   }
   // the app
-  for (const f of ['board.js', 'font.json', 'stops.json.gz', 'regions.json.gz']) addFile(`opt/odjezdy/${f}`, fs.readFileSync(path.join(APP, f)));
-  for (const f of fs.readdirSync(path.join(APP, 'themes')).filter((n) => n.endsWith('.js'))) {
-    addFile(`opt/odjezdy/themes/${f}`, fs.readFileSync(path.join(APP, 'themes', f)));
+  // the whole shared app (board.js, themes/, fonts/, vendor/, data)
+  for (const f of walk(APP)) {
+    const rel = f.rel.split(path.sep).join('/');
+    if (f.type === 'dir') addDir(`opt/odjezdy/${rel}`);
+    else addFile(`opt/odjezdy/${rel}`, fs.readFileSync(f.full));
   }
   addFile('opt/odjezdy/start.sh', fs.readFileSync(path.join(ROOT, 'start.sh')), 0o755);
   addFile('opt/odjezdy/config.json', JSON.stringify({ stop: { name: STOP, ids: [] }, favorites: [] }, null, 2) + '\n');

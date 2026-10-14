@@ -13,6 +13,8 @@ const KIND = {
 module.exports = {
   id: 'jr',
   name: 'JR (Japonsko)',
+  // DotGothic16 (OFL) for the main text; its 11-row cut is illegible, so labels stay in the BUSE small face
+  fonts: { normal: 'dotgothic', big: 'dotgothic' },
   style: 'led',
   background: [0, 0, 0],
   unlit: [10, 10, 10],
