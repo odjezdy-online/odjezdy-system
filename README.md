@@ -26,6 +26,10 @@ Vzhled se přepíná klávesou **T** nebo v úvodním menu. Většina vzhledů s
 | ![](docs/theme-uk.png) | ![](docs/theme-db-city.png) | ![](docs/theme-sbb-rail.png) |
 | **RATP SIEL (Paříž)** | **JR (Japonsko)** | **Výběr podle kraje** |
 | ![](docs/theme-ratp.png) | ![](docs/theme-jr.png) | ![](docs/browse-0.png) |
+| **Mimořádnost** | **Nastavení vzhledu** | |
+| ![](docs/alert.png) | ![](docs/settings.png) | |
+
+Při mimořádnosti (výluka zastávky, zrušený spoj) se přes jakýkoli vzhled pravidelně ukáže celoobrazovkové oznámení **Mimořádnost**. V nastavení jde vypnout.
 
 Vlastní vzhled zvládne kdokoli. Je to jeden JS soubor, návod je v **[docs/THEMES.md](docs/THEMES.md)**.
 
@@ -35,6 +39,7 @@ Vlastní vzhled zvládne kdokoli. Je to jeden JS soubor, návod je v **[docs/THE
 |---|---|
 | `S` / `Enter` | menu: poslední zastávka, předvolby, **výběr podle kraje → okresu → obce**, hledání |
 | `T` | další vzhled tabule |
+| myš | kurzor, klikání v menu, kolečko listuje, pravé tlačítko = zpět (v nastavení jde kurzor vypnout) |
 | `1`–`9` | rychlé přepnutí na naposledy použité zastávky |
 | `Q` | ukončit tabuli a otevřít shell (`exit` ji spustí znovu) |
 | `Alt+F2` | servisní konzole |
@@ -61,6 +66,7 @@ cd app && node board.js --png out.png --theme db
 
 ## Data a zdroje
 
-- Odjezdy, výluky a zastávky: [odjezdy.online](https://app.odjezdy.online) (PID, DÚK, IDSJMK, ODIS, CIS JŘ a další).
+- Odjezdy, výluky a zastávky v Česku: [odjezdy.online](https://app.odjezdy.online) (PID, DÚK, IDSJMK, ODIS, CIS JŘ a další).
+- Zastávky ve světě a čísla vlaků: [Transitous](https://transitous.org) (MOTIS 2 API, komunitní služba pro open-source a nekomerční projekty). **Zdroje dat: [transitous.org/sources](https://transitous.org/sources/)**, tabule je uvádí ve stavovém řádku. Transitous využívá i data © přispěvatelů OpenStreetMap.
 - BUSE font: `/cedulomat/font.fnt` z odjezdy.online, formát z OMSI BUSE TOOL.
 - Obce, okresy a kraje: číselníky ČSÚ se souřadnicemi obcí (souradnice.csv z [33bcdd/souradnice-mest](https://github.com/33bcdd/souradnice-mest)). V repu je jen odvozené přiřazení zastávek.

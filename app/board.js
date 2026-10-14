@@ -14,6 +14,10 @@ const zlib = require('zlib');
 const os = require('os');
 
 const API = process.env.ODJEZDY_API || 'https://app.odjezdy.online';
+// Worldwide GTFS/GTFS-RT via Transitous (MOTIS 2). Open-source & non-commercial use only; requires a
+// User-Agent with contact and visible attribution to https://transitous.org/sources/ (shown in the status line).
+const TRANSITOUS = process.env.ODJEZDY_TRANSITOUS || 'https://api.transitous.org';
+const USER_AGENT = 'OdjezdyOS/0.3 (+https://github.com/odjezdy-online/odjezdy-system)';
 const APP_DIR = __dirname;
 const CONFIG_FILE = process.env.ODJEZDY_CONFIG || '/etc/odjezdy/config.json';
 const args = process.argv.slice(2);
@@ -27,8 +31,15 @@ for (const f of Object.values(FONTS)) {
   }
 }
 const stripAccents = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+// characters the BUSE faces lack (international data from Transitous, typographic dashes/quotes);
+// '?' itself is a pictogram in BUSE, so unknown characters fall back to a space-ish dot instead
+const TRANSLIT = {
+  '–': '-', '—': '-', '‐': '-', '’': "'", '‘': "'", '‚': ',', '“': '"', '”': '"', '„': '"', '«': '"', '»': '"', '›': '>', '‹': '<',
+  'ø': 'o', 'Ø': 'O', 'æ': 'e', 'Æ': 'E', 'œ': 'o', 'Œ': 'O', 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ı': 'i', 'ß': 's',
+  '×': 'x', '•': '·', '→': '>', '←': '<', '…': '…',
+};
 function glyphOf(font, ch) {
-  return font.glyphs[ch] || font.glyphs[stripAccents(ch)] || font.glyphs['?'];
+  return font.glyphs[ch] || font.glyphs[TRANSLIT[ch]] || font.glyphs[stripAccents(ch)] || font.glyphs['.'] || font.glyphs['?'];
 }
 function textWidth(str, size) {
   const f = FONTS[size];
@@ -356,10 +367,11 @@ function searchStops(q, limit = 6) {
 }
 
 // ---------------------------------------------------------------- config
-const pickStop = (s) => ({ name: s.name, ids: s.ids, city: s.city });
+const pickStop = (s) => ({ name: s.name, ids: s.ids, city: s.city, ...(s.source ? { source: s.source, country: s.country } : {}) });
 // "Hlavní nádraží" exists in many towns -> show the town unless the name already says it
 function stopLabel(s) {
   if (!s) return '';
+  if (s.source === 'transitous') return s.city && !s.name.includes(s.city) ? `${s.name} (${s.city})` : s.name;
   const dupes = loadStops().filter((x) => x.name === s.name).length;
   return dupes > 1 && s.city && !norm(s.name).includes(norm(s.city).split(' ')[0]) ? `${s.name} (${s.city})` : s.name;
 }
@@ -417,14 +429,53 @@ async function getJson(p, timeout = 25000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const r = await fetch(API + p, { signal: ctrl.signal, headers: { 'User-Agent': 'OdjezdyOS/1.0 (board)' } });
+    const url = /^https?:/.test(p) ? p : API + p;
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': USER_AGENT } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return await r.json();
   } finally { clearTimeout(t); }
 }
 
 const depTime = (d) => new Date(d.expectedTime || d.plannedTime).getTime();
+// MOTIS mode -> our vehicle types
+const MOTIS_TYPE = {
+  TRAM: 'tram', SUBWAY: 'metro', METRO: 'metro', BUS: 'bus', COACH: 'bus', TROLLEYBUS: 'trolleybus', FERRY: 'ferry',
+  RAIL: 'train', REGIONAL_RAIL: 'train', REGIONAL_FAST_RAIL: 'train', HIGHSPEED_RAIL: 'train', LONG_DISTANCE: 'train',
+  NIGHT_RAIL: 'train', SUBURBAN: 'train', FUNICULAR: 'funicular', AERIAL_LIFT: 'cablecar',
+};
+const isTransitous = () => state.cfg.stop?.source === 'transitous';
+
+async function refreshTransitous() {
+  const id = state.cfg.stop.ids[0];
+  const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60`);
+  const now = Date.now(), alerts = new Map(), byLine = new Map();
+  const text = (a) => (a.headerText || a.descriptionText || '').replace(/\s+/g, ' ').trim();
+  state.deps = (j.stopTimes || []).map((x) => {
+    const p = x.place || {};
+    const planned = p.scheduledDeparture || p.departure, expected = p.departure || planned;
+    // route "U28 (Os 28018)" -> line "U28", train "Os 28018"
+    const route = String(x.routeShortName || x.displayName || '');
+    const line = route.replace(/\s*\(.*\)\s*$/, '') || route;
+    let train = x.tripShortName && x.tripShortName !== line ? x.tripShortName : '';
+    if (/^\d+$/.test(train)) train = `${line} ${Number(train)}`.trim(); // "000384" + "RJ" -> "RJ 384"
+    const notes = [...(p.alerts || []), ...(x.alerts || [])].map(text).filter(Boolean);
+    for (const n of notes) { alerts.set(n, true); if (!byLine.has(line)) byLine.set(line, n); }
+    return {
+      line, train, destination: x.headsign || '', platform: p.track || p.scheduledTrack || '',
+      plannedTime: planned, expectedTime: expected,
+      delayMinutes: x.realTime ? Math.round((new Date(expected) - new Date(planned)) / 60000) : null,
+      type: MOTIS_TYPE[x.mode] || 'bus', provider: x.agencyName || '', cancelled: !!(x.cancelled || p.cancelled),
+      source: 'transitous',
+    };
+  }).filter((d) => depTime(d) >= now - 60000).sort((a, b) => depTime(a) - depTime(b));
+  state.alerts = [...alerts.keys()].slice(0, 6);
+  state.lineAlerts = byLine;
+  state.lastOk = now;
+  state.error = null;
+}
+
 async function refreshBoard() {
+  if (isTransitous()) return refreshTransitous();
   const ids = state.cfg.stop.ids.slice(0, 8);
   if (!ids.length) return;
   const res = await Promise.allSettled(ids.map((id) => getJson('/api/board/' + encodeURIComponent(id))));
@@ -443,6 +494,7 @@ async function refreshBoard() {
   state.error = null;
 }
 async function refreshAlerts() {
+  if (isTransitous()) return; // alerts arrive together with the stop times
   const list = await getJson('/api/alerts');
   const name = norm(state.cfg.stop.name);
   const lines = new Set(state.deps.map((d) => String(d.line)));
@@ -478,6 +530,7 @@ const delayColor = (d) => (d.delayMinutes >= 5 ? C.RED : d.delayMinutes < 0 ? C.
 function depNotice(d) {
   const parts = [];
   let color = C.AMBER;
+  if (d.cancelled) { parts.push('spoj odpadá'); color = C.RED; }
   const alert = state.lineAlerts?.get(String(d.line));
   if (alert) parts.push('výluka: ' + alert);
   else if (d.provider === 'PID' && /^X/i.test(String(d.line))) parts.push('náhradní doprava');
@@ -510,6 +563,7 @@ function layout(m) {
 
 function renderBoard(m, t) {
   currentTheme().render(m, t, themeApi);
+  if (state.cfg.custom?.disruptions !== false) renderDisruption(m, t);
 }
 
 // what a theme gets to draw with (see themes/buse.js for the reference implementation)
@@ -521,11 +575,61 @@ const platformOf = (d) => {
 };
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
-  if (state.error) return `bez spojení (${state.error})`;
-  return state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))}` : state.net;
+  const src = isTransitous() ? 'data Transitous · transitous.org/sources' : 'data odjezdy.online';
+  if (state.error) return `bez spojení (${state.error}) · ${src}`;
+  return state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))} · ${src}` : state.net;
+}
+
+// word-wrap for the disruption screen
+function wrapText(str, face, maxW, maxLines = 4) {
+  const lines = [];
+  let cur = '';
+  for (const w of String(str).split(/\s+/)) {
+    const next = cur ? cur + ' ' + w : w;
+    if (textWidth(next, face) <= maxW) { cur = next; continue; }
+    if (cur) lines.push(cur);
+    cur = textWidth(w, face) > maxW ? fitText(w, face, maxW) : w;
+    if (lines.length === maxLines) break;
+  }
+  if (cur && lines.length < maxLines) lines.push(cur);
+  if (lines.length === maxLines && textWidth(lines.join(' '), face) < textWidth(str, face) - 4) lines[maxLines - 1] = fitText(lines[maxLines - 1] + ' …', face, maxW);
+  return lines;
+}
+
+// ---------------------------------------------------------------- disruption screen
+// Real boards interrupt the departure list with a full-width notice; every 40 s we show each current
+// disruption (stop alerts, cancelled trips) for 9 s. A theme may override it with renderAlert(m, t, api, text).
+function currentDisruptions() {
+  const list = [...state.alerts];
+  for (const d of upcoming().slice(0, 12)) {
+    if (d.cancelled) list.push(`Spoj ${d.train || d.line} → ${d.destination} (${hhmm(new Date(d.plannedTime))}) dnes odpadá.`);
+  }
+  return [...new Set(list)];
+}
+function renderDisruption(m, t) {
+  const list = currentDisruptions();
+  if (!list.length) return false;
+  const PERIOD = 40000, SHOW = 9000;
+  const phase = t % PERIOD;
+  if (phase > SHOW) return false;
+  const text = list[Math.floor(t / PERIOD) % list.length];
+  const th = currentTheme();
+  if (typeof th.renderAlert === 'function') { th.renderAlert(m, t, themeApi, text); return true; }
+  const W = m.cols, big = FONTS.big.rows, nor = FONTS.normal.rows;
+  const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.floor((m.rows - big - 30) / (nor + 3))));
+  const h = big + 10 + lines.length * (nor + 3) + 6;
+  const y0 = Math.max(0, Math.floor((m.rows - h) / 2));
+  for (let y = y0; y < y0 + h; y++) for (let x = 0; x < W; x++) m.set(x, y, 0);
+  m.hline(0, W - 1, y0, C.RED);
+  m.hline(0, W - 1, y0 + h - 1, C.RED);
+  // blinking warning title, like "Störung" / "Mimořádnost" screens
+  if (Math.floor(t / 700) % 2 === 0 || phase > 2800) m.textCenter('Mimořádnost', y0 + 4, 'big', C.RED);
+  lines.forEach((l, i) => m.textCenter(l, y0 + big + 8 + i * (nor + 3), 'normal', C.WHITE));
+  if (list.length > 1) m.textRight(`${(Math.floor(t / PERIOD) % list.length) + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
+  return true;
 }
 const themeApi = {
-  state, C, FONTS, textWidth, fitText, faceCovers, stopLabel, hhmm, pad2,
+  state, C, FONTS, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
 };
 
@@ -586,6 +690,7 @@ function openStart(withCountdown) {
   presetStops().forEach((s) => push(s));
   items.push({ browse: true, label: 'Vybrat podle kraje, okresu a obce…' });
   items.push({ search: true, label: 'Hledat jinou zastávku…' });
+  items.push({ world: true, label: 'Hledat ve světě (Transitous)…' });
   items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
   items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
   state.start = { items, sel: 0, until: withCountdown ? Date.now() + START_TIMEOUT : 0 };
@@ -730,7 +835,8 @@ const SETTINGS = [
   { key: 'theme', label: 'Vzhled', values: () => THEMES.map((x) => x.id), show: (v) => (THEMES.find((x) => x.id === v) || THEMES[0]).name },
   { key: 'tint', label: 'Barva textu', values: () => Object.keys(TINT_NAMES), show: (v) => TINT_NAMES[v || 'theme'] },
   { key: 'style', label: 'Styl bodů', values: () => ['theme', 'led', 'lcd'], show: (v) => ({ theme: 'podle vzhledu', led: 'LED body', lcd: 'LCD plné' })[v || 'theme'] },
-  { key: 'brightness', label: 'Jas', values: () => [100, 85, 70, 55, 40], show: (v) => `${v ?? 100} %` },
+  { key: 'brightness', label: 'Jas (procenta)', values: () => [100, 85, 70, 55, 40], show: (v) => String(v ?? 100) }, // '%' is a BUSE pictogram
+  { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
 ];
 function settingValue(it) {
@@ -778,6 +884,63 @@ function settingsKey(k) {
   else if (k === '\u001b' || k === 'q') openStart(false);
 }
 
+// ---------------------------------------------------------------- worldwide stop search (Transitous)
+let worldTimer = null;
+function worldSearch() {
+  clearTimeout(worldTimer);
+  const w = state.world;
+  if (w.query.trim().length < 3) { w.results = []; return; }
+  worldTimer = setTimeout(async () => {
+    const q = w.query;
+    w.busy = true;
+    try {
+      const j = await getJson(`${TRANSITOUS}/api/v1/geocode?text=${encodeURIComponent(q)}&type=STOP`, 15000);
+      if (state.world !== w || w.query !== q) return;
+      w.results = (j || []).slice(0, 12).map((x) => ({
+        name: x.name, ids: [x.id], source: 'transitous',
+        city: (x.areas || []).map((a) => a.name).filter((n) => n && n !== x.name).slice(-1)[0] || x.country || '',
+        country: x.country || '',
+      }));
+      w.sel = 0; w.err = null;
+    } catch (e) { w.err = e.message; }
+    w.busy = false;
+  }, 600); // debounce: keep Transitous load light
+}
+function renderWorld(m, t) {
+  const W = m.cols, L = layout(m), w = state.world;
+  m.text('Svět · Transitous', 1, 1, 'big', C.AMBER);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  const qy = L.headerLine + 4;
+  const cursor = Math.floor(t / 500) % 2 ? '_' : ' ';
+  m.text('Hledat:', 2, qy, 'normal', C.DIM);
+  m.text(w.query + cursor, 4 + textWidth('Hledat:', 'normal'), qy, 'normal', C.WHITE);
+  const ry = qy + L.rowH + 4;
+  if (w.err) m.text(fitText('Chyba: ' + w.err, 'small', W - 4), 2, ry, 'small', C.RED);
+  else if (w.busy) m.text('Hledám…', 2, ry, 'small', C.DIM);
+  else if (w.query.length < 3) m.text('Napiš aspoň 3 písmena (např. Wien Hbf, London Bridge, Zürich)', 2, ry, 'small', C.DIM);
+  const rows = Math.max(1, Math.floor((m.rows - ry - L.sm - 6) / L.rowH));
+  w.results.slice(0, rows).forEach((s, i) => {
+    const y = ry + (w.busy || w.err ? L.rowH : 0) + i * L.rowH, on = i === w.sel;
+    if (on) m.text('>', 2, y, 'normal', C.WHITE);
+    const info = [s.city, s.country].filter(Boolean).join(' · ');
+    m.text(fitText(s.name, 'normal', W - textWidth(info, 'small') - 18), 9, y, 'normal', on ? C.WHITE : C.AMBER);
+    m.textRight(fitText(info, 'small', W / 2), W - 2, y, 'small', C.DIM);
+    hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { w.sel = i; }, click: () => chooseStop(s) });
+  });
+  m.text('Data: transitous.org/sources · Šipky, Enter · Esc zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function worldKey(k) {
+  const w = state.world;
+  if (k === '\u001b') return openStart(false);
+  if (k === '\u001b[A') { w.sel = Math.max(0, w.sel - 1); return; }
+  if (k === '\u001b[B') { w.sel = Math.min(w.results.length - 1, w.sel + 1); return; }
+  if (k === '\r') { const s = w.results[w.sel]; if (s) chooseStop(s); return; }
+  if (k === '\u007f' || k === '\b') w.query = w.query.slice(0, -1);
+  else if (k.length === 1 && k >= ' ') w.query += k;
+  else return;
+  worldSearch();
+}
+
 function renderStart(m, t) {
   const W = m.cols, L = layout(m), st = state.start;
   m.text('Kam to dnes bude', 1, 1, 'big', C.AMBER); // no '?': it is a pictogram in the BUSE face
@@ -790,8 +953,8 @@ function renderStart(m, t) {
     const idx = first + i, y = L.headerLine + 5 + i * L.rowH, on = idx === st.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { st.sel = idx; st.until = 0; }, click: () => { st.sel = idx; pickStart(it); } });
-    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings ? C.DIM : C.AMBER));
-    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
+    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings || it.world ? C.DIM : C.AMBER));
+    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings && !it.world) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
   });
   const left = st.until ? Math.max(0, Math.ceil((st.until - Date.now()) / 1000)) : 0;
   const hint = (left ? `Spustím za ${left} s · ` : '') + 'šipky, Enter, číslo nebo piš';
@@ -805,7 +968,7 @@ function startKey(k) {
   else if (k === '\u001b[B') st.sel = Math.min(st.items.length - 1, st.sel + 1);
   else if (k === '\r') pickStart(st.items[st.sel]);
   else if (k === '\u001b') pickStart(st.items[0]);
-  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings) pickStart(st.items[+k]);
+  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings && !st.items[+k].world) pickStart(st.items[+k]);
   else if (k === 't' || k === 'T') {
     cycleTheme(1);
     const it = st.items.find((x) => x.theme);
@@ -816,6 +979,7 @@ function startKey(k) {
 function pickStart(it) {
   if (!it) return;
   if (it.browse) { openBrowse(); return; }
+  if (it.world) { state.mode = 'world'; state.world = { query: '', results: [], sel: 0, busy: false, err: null }; return; }
   if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
   if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
@@ -827,6 +991,7 @@ function onKey(k) {
   if (state.mode === 'start') return startKey(k);
   if (state.mode === 'browse') return browseKey(k);
   if (state.mode === 'settings') return settingsKey(k);
+  if (state.mode === 'world') return worldKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -877,6 +1042,7 @@ function tick() {
   if (state.mode === 'start') renderStart(m, t);
   else if (state.mode === 'browse') renderBrowse(m, t);
   else if (state.mode === 'settings') renderSettings(m, t);
+  else if (state.mode === 'world') renderWorld(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else renderBoard(m, t);
@@ -914,6 +1080,7 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
+    if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 4000; }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];

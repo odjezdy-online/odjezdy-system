@@ -1,6 +1,6 @@
 // Deutsche Bahn style: LCD screen, white on dark blue, white title bar.
 // Two layouts like the real thing:
-//   rail  (station):  Zeit | Zug | Ziel | Gleis   + "ca. +5" yellow delay box, small line under the destination
+//   rail  (station):  like bahnhof.de "Abfahrt": train badge + time (+ new time in a white box) | Über/Ziel | Gleis
 //   urban (city stop): Linie | Ziel | Abfahrt (in min, "sofort")
 const { paginate, box, badge, emptyMessage, clockText, marquee, boardKind, isRail, countdown } = require('./_util');
 
@@ -37,36 +37,56 @@ module.exports = {
 };
 
 function railBoard(m, t, api, deps, hy) {
-  const { C, textWidth, fitText, hhmm, platformOf, depNotice } = api;
+  const { C, textWidth, fitText, hhmm, platformOf, depNotice, depTime } = api;
   const W = m.cols, nor = api.FONTS.normal.rows, sm = api.FONTS.small.rows;
-  const colTime = 3, colTrain = colTime + textWidth('88:88', 'normal') + 8;
-  const colDest = colTrain + textWidth('Os 8888', 'small') + 8;
+  const leftW = textWidth('88:88', 'normal') + textWidth('88:88', 'small') + 10;
+  const colMid = leftW + 8;
   const gleisW = textWidth('Gleis', 'small') + 4;
-  m.text('Zeit', colTime, hy, 'small', C.DIM);
-  m.text('Zug', colTrain, hy, 'small', C.DIM);
-  m.text('Ziel', colDest, hy, 'small', C.DIM);
+  const midEnd = W - gleisW - 10;
+  m.textRight('Zug/Bus', leftW, hy, 'small', C.DIM);
+  m.text('Über', colMid, hy, 'small', C.DIM);
   m.textRight('Gleis', W - 3, hy, 'small', C.DIM);
-  const top = hy + sm + 3;
-  const rowH = nor + sm + 6;
-  const per = Math.max(1, Math.floor((m.rows - top - 2) / rowH));
-  const pg = paginate(deps.slice(0, per * 4), per, t, 7000);
+  const hy2 = hy + sm + 1;
+  m.textRight('Zeit', leftW, hy2, 'small', C.DIM);
+  m.text('Ziel', colMid, hy2, 'small', C.DIM);
+  const lineY = hy2 + sm + 1;
+  m.hline(2, leftW, lineY, C.AMBER); m.hline(colMid, midEnd, lineY, C.AMBER); m.hline(midEnd + 6, W - 3, lineY, C.AMBER);
+
+  const top = lineY + 4;
+  const rowH = sm + nor + 7;
+  const per = Math.max(1, Math.floor((m.rows - top - 1) / rowH));
+  const pg = paginate(deps.slice(0, per * 4), per, t, 8000);
   pg.items.forEach((d, k) => {
     const y = top + k * rowH;
-    m.hline(0, W - 1, y - 2, C.DIM);
-    m.text(hhmm(new Date(d.plannedTime)), colTime, y, 'normal', C.AMBER);
-    if (d.delayMinutes > 0) badge(m, api, `ca. +${d.delayMinutes}`, colTime, y + nor + 2, 'small', C.YELLOW, 0, 1);
-    else if (d.delayMinutes < 0) m.text(`${d.delayMinutes}`, colTime, y + nor + 2, 'small', C.DIM);
-    // train: category + number ("R 1234"); for non-rail rows on a station board, the line
-    m.text(fitText(String(d.line), 'small', colDest - colTrain - 4), colTrain, y + 1, 'small', C.AMBER);
-    const plat = platformOf(d);
-    if (plat) m.textRight(fitText(plat, 'normal', gleisW + 10), W - 3, y, 'normal', C.AMBER);
-    const destMax = W - colDest - gleisW - 14;
-    m.text(fitText(d.destination || '', 'normal', destMax), colDest, y, 'normal', C.AMBER);
+    const yTime = y + sm + 2;
+    // train / line badge (S-Bahn green pill, everything else grey)
+    const label = fitText(d.train || String(d.line), 'small', leftW - 4);
+    const sbahn = /^S\s?\d/.test(String(d.line));
+    const bw = textWidth(label, 'small') + 4;
+    badge(m, api, label, leftW - bw + 1, y + 1, 'small', sbahn ? C.GREEN : C.GREY, sbahn ? C.WHITE : C.WHITE, 2);
+    // planned time, and the expected one in a white box when late
+    const planned = hhmm(new Date(d.plannedTime));
+    if (d.delayMinutes > 0) {
+      const exp = hhmm(new Date(depTime(d)));
+      const ew = textWidth(exp, 'small') + 4;
+      badge(m, api, exp, leftW - ew + 1, yTime + 2, 'small', C.WHITE, 0, 2);
+      m.textRight(planned, leftW - ew - 3, yTime, 'normal', C.AMBER);
+    } else {
+      m.textRight(planned, leftW, yTime, 'normal', C.AMBER);
+    }
+    // small line above the destination: disruption first, otherwise operator / line
     const n = depNotice(d);
-    const sub = n ? n.text : (isRail(d) ? 'Zug' : typeName(d.type));
-    marquee(m, api, sub, colDest, colDest + destMax, y + nor + 2, 'small', n ? C.YELLOW : C.DIM, t);
+    const over = n ? n.text : [d.train && d.line && d.train !== String(d.line) ? d.line : '', d.provider].filter(Boolean).join(' · ');
+    if (over) marquee(m, api, over, colMid, midEnd, y + 1, 'small', n ? C.YELLOW : C.DIM, t);
+    const dest = d.cancelled ? `${d.destination}  · fällt aus` : d.destination || '';
+    m.text(fitText(dest, 'normal', midEnd - colMid), colMid, yTime, 'normal', d.cancelled ? C.RED : C.AMBER);
+    const plat = platformOf(d);
+    if (plat) m.textRight(fitText(plat, 'normal', gleisW + 6), W - 3, yTime, 'normal', C.AMBER);
+    // underline per column, like the screenshot
+    const uy = y + rowH - 2;
+    m.hline(2, leftW, uy, C.DIM); m.hline(colMid, midEnd, uy, C.DIM); m.hline(midEnd + 6, W - 3, uy, C.DIM);
   });
-  if (pg.pages > 1) m.textRight(`${pg.page + 1}/${pg.pages}`, W - 3 - gleisW - 10, hy, 'small', C.DIM);
+  if (pg.pages > 1) m.textRight(`${pg.page + 1}/${pg.pages}`, midEnd, hy, 'small', C.DIM);
 }
 
 function cityBoard(m, t, api, deps, hy) {
