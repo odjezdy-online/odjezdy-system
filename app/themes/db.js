@@ -209,7 +209,7 @@ function nativeRender(c, t, api) {
       }
       c.text(planned, tx, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, align: 'right' });
       // "über" line, destination, platform
-      const over = n ? n.text : [d.train && d.train !== String(d.line) ? d.line : '', d.provider].filter(Boolean).join(' – ');
+      const over = n ? n.text : d.via?.length ? d.via.slice(0, 5).join(' – ') : [d.train && d.train !== String(d.line) ? d.line : '', d.provider].filter(Boolean).join(' – ');
       c.text(over, colM, y + 30 * s, { font: n ? F.semi : F.reg, size: 16 * s, color: n ? N.yellow : N.dim, maxW: midEnd - colM });
       c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 10 * s });
       const plat = platformOf(d);

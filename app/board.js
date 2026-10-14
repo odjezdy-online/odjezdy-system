@@ -543,6 +543,11 @@ async function refreshBoard() {
   const now = Date.now(), seen = new Set(), all = [];
   for (const r of ok) for (const d of r.value.data || []) {
     if (depTime(d) < now - 60000) continue;
+    // richer fields from the odjezdy.online rewrite backend (absent on the old API -> no change)
+    if (d.terminatesHere) continue; // the train ends here: an arrival, not a departure
+    if (d.trainNumber && !d.train) d.train = `${d.category || d.line || ''} ${d.trainNumber}`.trim();
+    if (d.destinationConfident === false) d.destination = ''; // "Neznámá stanice" placeholder: better blank
+    d.via = Array.isArray(d.viaStops) ? d.viaStops : [];
     const k = `${d.line}|${d.destination}|${d.plannedTime}`;
     if (seen.has(k)) continue;
     seen.add(k); all.push(d);

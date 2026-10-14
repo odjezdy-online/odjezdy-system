@@ -110,7 +110,7 @@ function nativeSBB(c, t, api) {
     if (!urban && d.delayMinutes > 0) c.text(`+${d.delayMinutes}'`, colTime, y + 78 * s, { font: FS.bold, size: 22 * s, color: SB.red });
     c.text(d.cancelled ? `${d.destination} — fällt aus` : d.destination, colDest, y + 48 * s, { font: FS.bold, size: 34 * s, color: d.cancelled ? SB.red : SB.white, maxW: x1 - colDest - platW - 20 * s });
     const n = depNotice(d);
-    const sub = n ? n.text : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || '') + (d.provider ? ` · ${d.provider}` : '');
+    const sub = n ? n.text : d.via?.length ? d.via.slice(0, 4).join(' · ') : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || '') + (d.provider ? ` · ${d.provider}` : '');
     c.text(sub, colDest, y + 78 * s, { font: n ? FS.bold : FS.reg, size: 20 * s, color: n ? SB.red : SB.dim, maxW: x1 - colDest - platW - 20 * s });
     const plat = platformOf(d);
     if (plat) {

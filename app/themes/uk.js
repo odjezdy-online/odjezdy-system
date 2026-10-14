@@ -80,7 +80,7 @@ module.exports = {
     row(deps[0], 0, y, C.AMBER);
     y += nor + 2;
     const n = depNotice(deps[0]);
-    const calling = n ? n.text : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
+    const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
     m.text('Calling at:', 2, y, 'small', C.DIM);
     marquee(m, api, calling, 2 + textWidth('Calling at: ', 'small'), W - 2, y, 'small', C.AMBER, t);
     y += nor + 4;
@@ -149,7 +149,7 @@ function nativeUK(c, t, api) {
   row(deps[0], 0, 64 * s, 52);
   // "Calling at" ticker (clipped by painting the margins back to black)
   const n = depNotice(deps[0]);
-  const calling = n ? n.text : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
+  const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
   const lx = x0 + c.measure('Calling at: ', FU.med, 36 * s), tw = c.measure(calling, FU.med, 36 * s) + 80 * s;
   const off = (t / 25) % (tw + (x1 - lx));
   c.text(calling, x1 - off, 122 * s, { font: FU.med, size: 36 * s, color: AMBER });
