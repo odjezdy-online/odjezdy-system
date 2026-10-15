@@ -283,6 +283,7 @@ class Screen {
       const i = fbInfo();
       Object.assign(this, i);
       this.fd = fs.openSync('/dev/fb0', 'r+');
+      fbSig = fbSignature(); // what we opened, so a later driver swap is noticed (checkFb)
     }
     // ~256 LED columns regardless of resolution
     this.pitch = Math.max(3, Math.floor(this.w / 256));
@@ -297,8 +298,9 @@ class Screen {
   }
   // paint matrix into the pixel buffer; dark "unlit" dots are drawn very faintly like a real panel
   draw(m) {
-    // full repaint every ~2 s in case kernel/console text was printed over the framebuffer
-    if (++this.frames % 30 === 0) this.prev = null;
+    // full repaint every ~2 s in case kernel/console text was printed over the framebuffer;
+    // every frame during the first ~5 s (boot messages, fbcon handover)
+    if (++this.frames % 30 === 0 || this.frames < 75) this.prev = null;
     const th = currentLook();
     if (th !== this.look) { this.look = th; this.prev = null; this.frame.fill(0); }
     const { frame, stride, pitch, offX, offY, bpp } = this;
@@ -328,7 +330,7 @@ class Screen {
     }
     this.prev = Uint8Array.from(m.buf);
     const under = pointer.visible ? this.drawCursor(put, bytes) : null;
-    if (this.fd !== null) fs.writeSync(this.fd, frame, 0, frame.length, 0);
+    if (this.fd !== null && ownVtActive(true)) fs.writeSync(this.fd, frame, 0, frame.length, 0); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
     if (under) { under.data.copy(frame, 0, 0, 0); this.restoreCursor(under, bytes); }
   }
   // native mode: copy an RGB canvas (vector theme) into the framebuffer format
@@ -347,7 +349,7 @@ class Screen {
     this.look = null;
     const put = (o, col) => { frame[o] = col[2]; frame[o + 1] = col[1]; frame[o + 2] = col[0]; if (bytes === 4) frame[o + 3] = 255; };
     const under = pointer.visible ? this.drawCursor(put, bytes) : null;
-    if (this.fd !== null) fs.writeSync(this.fd, frame, 0, frame.length, 0);
+    if (this.fd !== null && ownVtActive(true)) fs.writeSync(this.fd, frame, 0, frame.length, 0); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
     if (under) this.restoreCursor(under, bytes);
   }
   // arrow sprite drawn on top of the frame, the pixels below are restored after the write
@@ -1152,17 +1154,48 @@ let screen, m, t0 = Date.now();
 // The framebuffer is shared by all virtual consoles: after Alt+F2 the board must stop painting,
 // otherwise it would draw over the service console. Our console is the one we started on (tty1).
 let vtCheckAt = 0, vtActive = true;
-const OWN_VT = (() => { try { return fs.readlinkSync('/proc/self/fd/0').replace('/dev/', ''); } catch { return 'tty1'; } })();
-function ownVtActive() {
+// ODJEZDY_VT wins; otherwise the first stdio fd that is a real ttyN. Under systemd stdin can be
+// /dev/console, /dev/tty0 or /dev/null, which never equals the active VT name -> fall back to tty1.
+const OWN_VT = (() => {
+  if (/^tty\d+$/.test(process.env.ODJEZDY_VT || '')) return process.env.ODJEZDY_VT;
+  for (const fd of [0, 1, 2]) {
+    try { const n = fs.readlinkSync(`/proc/self/fd/${fd}`).replace('/dev/', ''); if (/^tty[1-9]\d*$/.test(n)) return n; } catch {}
+  }
+  return 'tty1';
+})();
+function ownVtActive(force = false) {
   if (PNG_OUT) return true;
-  if (Date.now() - vtCheckAt > 400) {
+  if (force || Date.now() - vtCheckAt > 300) {
     vtCheckAt = Date.now();
     let now = vtActive;
-    try { now = fs.readFileSync('/sys/class/tty/tty0/active', 'utf8').trim() === OWN_VT; } catch { now = true; }
+    try { now = fs.readFileSync('/sys/class/tty/tty0/active', 'utf8').trim() === OWN_VT; } catch {} // unreadable: keep last state
     if (now && !vtActive && screen) { screen.prev = null; screen.look = null; lastNative = 0; } // repaint on return
     vtActive = now;
+    if (now && !force) checkFb(); // not from inside Screen.draw: it may replace the screen
   }
   return vtActive;
+}
+// When the real DRM driver (bochs, virtio-gpu, i915 …) takes over from simplefb/efifb during boot,
+// /dev/fb0 is replaced: our old fd then writes into a dead buffer while the screen keeps the GRUB/boot
+// text. Detect the swap (name/size change) and reopen; also force full repaints for the first seconds.
+let fbSig = null, fbCheckAt = 0;
+function fbSignature() {
+  try { const b = '/sys/class/graphics/fb0'; return ['name', 'virtual_size', 'bits_per_pixel', 'stride'].map((f) => { try { return fs.readFileSync(`${b}/${f}`, 'utf8').trim(); } catch { return ''; } }).join('|'); } catch { return null; }
+}
+function checkFb() {
+  if (PNG_OUT || !screen || Date.now() - fbCheckAt < 1500) return;
+  fbCheckAt = Date.now();
+  const sig = fbSignature();
+  if (sig === fbSig) return;
+  log(`framebuffer changed (${fbSig} -> ${sig}), reopening /dev/fb0`);
+  try {
+    const old = screen;
+    screen = new Screen();
+    try { fs.closeSync(old.fd); } catch {}
+    m = new Matrix(screen.cols, screen.rows);
+    nativeCanvas = null; lastNative = 0;
+    pointer.x = Math.min(pointer.x, screen.w - 1); pointer.y = Math.min(pointer.y, screen.h - 1);
+  } catch (e) { log(`fb reopen failed: ${e.message}`); }
 }
 
 function tick() {
