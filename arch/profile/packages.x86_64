@@ -1,0 +1,29 @@
+# base system
+base
+linux
+mkinitcpio
+mkinitcpio-archiso
+intel-ucode
+amd-ucode
+# drivers: GPU firmware and the common network chips (the DRM/network modules are in the kernel package)
+linux-firmware-intel
+linux-firmware-amdgpu
+linux-firmware-radeon
+linux-firmware-realtek
+linux-firmware-atheros
+linux-firmware-mediatek
+linux-firmware-broadcom
+# network: systemd-networkd/resolved/timesyncd for Ethernet, iwd for Wi-Fi
+iwd
+# the board itself
+nodejs
+odjezdy-board
+# boot loaders for the live medium
+syslinux
+# installer
+arch-install-scripts
+parted
+dosfstools
+e2fsprogs
+grub
+efibootmgr

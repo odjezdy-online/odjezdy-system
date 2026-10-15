@@ -1,0 +1,21 @@
+[Unit]
+Description=Odjezdy board on tty1
+After=systemd-user-sessions.service network.target
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Environment=TZ=Europe/Prague
+ExecStart=/usr/bin/odjezdy-board-run
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

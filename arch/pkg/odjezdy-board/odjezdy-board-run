@@ -1,0 +1,27 @@
+#!/bin/sh
+# Started by odjezdy-board.service on tty1. systemd restarts it when it exits.
+export TZ=Europe/Prague
+APP=/opt/odjezdy
+
+dmesg -n 1 2>/dev/null
+printf '\033[?25l\033[2J\033[H'
+
+# wait for a framebuffer (DRM drivers are loaded by udev; try the usual VM ones once)
+i=0
+while [ ! -e /dev/fb0 ] && [ $i -lt 20 ]; do
+  [ $i -eq 3 ] && for m in bochs virtio-gpu vmwgfx hyperv_drm qxl cirrus simpledrm vboxvideo; do modprobe -q "$m" 2>/dev/null; done
+  sleep 1; i=$((i + 1))
+done
+if [ ! -e /dev/fb0 ]; then
+  echo "   Nenašel jsem framebuffer (/dev/fb0). Přihlas se na tty2 (Alt+F2) jako root."
+  sleep 30; exit 1
+fi
+
+setterm -blank 0 -powersave off -cursor off >/dev/null 2>&1
+node "$APP/board.js"
+rc=$?
+printf '\033[?25h\033[2J\033[H'
+if [ $rc -eq 10 ]; then
+  echo "Odjezdy OS: shell. Tabuli znovu spustíš příkazem: exit"
+  /bin/bash -l
+fi
