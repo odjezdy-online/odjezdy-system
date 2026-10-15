@@ -47,11 +47,26 @@ Vlastní vzhled zvládne kdokoli. Je to jeden JS soubor, návod je v **[docs/THE
 | `Q` | ukončit tabuli a otevřít shell (`exit` ji spustí znovu) |
 | `Alt+F2` | servisní konzole |
 
+## Stažení a aktualizace
+
+Hotová ISO jsou v **[Releases](https://github.com/odjezdy-online/odjezdy-system/releases)**. Sestavuje je GitHub Actions ([`release.yml`](.github/workflows/release.yml)) automaticky: stačí na `main` změnit číslo v [`app/VERSION`](app/VERSION) (např. `0.5.0`) a workflow vytvoří tag `v0.5.0`, sestaví ISO a zveřejní vydání. Verze, která už vydaná je, se přeskočí. Jde to i ručně tagem nebo přes *Actions → Release → Run workflow*. Ke každému vydání patří i balíček aplikace `odjezdy-app.tar.gz` s kontrolním součtem.
+
+Běžící tabule se jednou za 6 hodin podívá, jestli nevyšla nová verze. Když ano, ukáže obrazovku **Aktualizace** a zeptá se: *Aktualizovat / Později / Tuto verzi přeskočit*. Bez odpovědi se po 2 minutách vrátí na tabuli. Ručně jde aktualizace spustit v menu (`S` → *Aktualizace*). V nastavení se dá přepnout na *automaticky* nebo *vypnuté*.
+
+![Obrazovka aktualizace](docs/update.png)
+
+Jak to funguje ([`app/updater.js`](app/updater.js)):
+- Stažený balíček se ověří podle SHA-256 a rozbalí do `/var/lib/odjezdy/app`. Aplikace z ISO nebo z balíčku se nemění, při startu jen předá řízení novější verzi.
+- Když nová verze nevydrží běžet ani 20 s, při dalším startu se automaticky vrátí ta původní a tahle verze se už nenabídne.
+- Na živém Alpine ISO se aktualizace po restartu ztratí, pokud médium není zapisovatelné (`lbu commit`). Tabule se pak zeptá znovu.
+
 ## Struktura
 
 ```
 app/            aplikace tabule (Node.js, bez závislostí)
   board.js      data, vykreslování LED/LCD matice, menu, výběr zastávky
+  updater.js    aktualizace z GitHub Releases (ověření, rozbalení, návrat zpět)
+  VERSION       verze aplikace (při vydání ji přepíše workflow podle tagu)
   themes/       vzhledy tabulí (buse, uk, db, sbb, ratp, jr) a _util.js
   font.json     BUSE panelový font převedený z odjezdy.online (tools/fnt2json.js)
   stops.json.gz index 43 tisíc zastávek
