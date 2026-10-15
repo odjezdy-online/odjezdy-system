@@ -11,7 +11,7 @@ OUT="$(cd "$OUT" && pwd)"
 docker run --rm --privileged \
   -v "$REPO":/src:ro -v "$OUT":/out \
   -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || date +%s)}" \
-  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -e ODJEZDY_DU="${ODJEZDY_DU:-}" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
   archlinux:latest bash -euo pipefail -c '
     pacman -Syu --noconfirm --needed archiso base-devel git grub mtools dosfstools >/dev/null
     useradd -m builder 2>/dev/null || true
@@ -31,6 +31,10 @@ docker run --rm --privileged \
 
     # 3) ISO
     mkarchiso -v -w /build/work -o /out /build/profile
+    if [ -n "${ODJEZDY_DU:-}" ]; then   # size report of the root filesystem (debug aid)
+      mkdir -p /tmp/rootfs && fsck.erofs --extract=/tmp/rootfs /build/work/iso/arch/x86_64/airootfs.erofs >/dev/null 2>&1
+      du -x --max-depth=3 -m /tmp/rootfs | sort -n | tail -25
+    fi
     chown "$HOST_UID:$HOST_GID" /out/*.iso
     ls -la /out
   '

@@ -58,6 +58,7 @@ HoldPkg = pacman glibc
 Architecture = auto
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
+NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/gtk-doc/* usr/share/locale/* !usr/share/locale/cs/* !usr/share/locale/locale.alias usr/include/* usr/share/gir-1.0/*
 [core]
 Include = /etc/pacman.d/mirrorlist
 [extra]
@@ -94,7 +95,7 @@ if [ "$MODE" = uefi ]; then
 else
   arch-chroot /mnt grub-install --target=i386-pc "$DISK"
 fi
-sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3"/; s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /mnt/etc/default/grub
+sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 fbcon=nodefer"/; s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /mnt/etc/default/grub
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 
 sync
