@@ -1,0 +1,34 @@
+name: Arch ISO
+on:
+  push:
+    paths: ['arch/**', 'app/**', '.github/workflows/arch-iso.yml']
+  pull_request:
+    paths: ['arch/**', 'app/**', '.github/workflows/arch-iso.yml']
+  workflow_dispatch:
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck arch/build.sh arch/installer/odjezdy-install arch/pkg/odjezdy-board/odjezdy-board-run arch/test/smoke.sh
+      - name: Build ISO
+        run: arch/build.sh "$RUNNER_TEMP/out"
+      - name: Boot smoke test (QEMU)
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86
+          # board needs network for departures but the screen is drawn without it; KVM is used when available
+          SMOKE_KEEP="$RUNNER_TEMP/screen.png" arch/test/smoke.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso 90
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odjezdy-os-iso
+          path: ${{ runner.temp }}/out/*.iso
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boot-screenshot
+          path: ${{ runner.temp }}/screen.png

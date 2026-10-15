@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Odjezdy OS installer: puts a regular Arch Linux system with the departure board on a disk.
+# Usage: odjezdy-install [--disk /dev/sdX] [--hostname NAME] [--yes] [--offline]
+#   --yes      do not ask for confirmation (needs --disk); DESTROYS the whole disk
+#   --offline  use only the packages bundled on the medium (not implemented: uses mirrors)
+set -euo pipefail
+
+DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --disk) DISK="$2"; shift 2 ;;
+    --hostname) HOST="$2"; shift 2 ;;
+    --root-password) ROOTPW="$2"; shift 2 ;;
+    --yes) YES=1; shift ;;
+    -h|--help) sed -n 2,6p "$0"; exit 0 ;;
+    *) echo "Neznámý parametr: $1" >&2; exit 2 ;;
+  esac
+done
+[ "$(id -u)" -eq 0 ] || { echo "Spusť jako root." >&2; exit 1; }
+
+say() { printf '\n== %s\n' "$*"; }
+
+if [ -z "$DISK" ]; then
+  echo "Dostupné disky:"
+  lsblk -dpno NAME,SIZE,MODEL,TYPE | awk '$NF=="disk"'
+  read -r -p "Na který disk instalovat (např. /dev/sda)? " DISK
+fi
+[ -b "$DISK" ] || { echo "$DISK není blokové zařízení." >&2; exit 1; }
+if [ "$YES" -ne 1 ]; then
+  echo "VAROVÁNÍ: celý disk $DISK bude smazán."
+  read -r -p "Pro potvrzení napiš celou cestu disku: " ans
+  [ "$ans" = "$DISK" ] || { echo "Zrušeno."; exit 1; }
+fi
+
+if [ -d /sys/firmware/efi ]; then MODE=uefi; else MODE=bios; fi
+case "$DISK" in *nvme*|*mmcblk*|*loop*) P="p" ;; *) P="" ;; esac
+
+say "Dělím disk ($MODE)"
+umount -R /mnt 2>/dev/null || true
+wipefs -af "$DISK" >/dev/null
+if [ "$MODE" = uefi ]; then
+  parted -s "$DISK" mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on mkpart root ext4 513MiB 100%
+  ESP="${DISK}${P}1"; ROOT="${DISK}${P}2"
+  mkfs.fat -F32 "$ESP" >/dev/null
+else
+  parted -s "$DISK" mklabel gpt mkpart bios 1MiB 2MiB set 1 bios_grub on mkpart root ext4 2MiB 100%
+  ROOT="${DISK}${P}2"
+fi
+partprobe "$DISK" 2>/dev/null || true; udevadm settle
+mkfs.ext4 -qF "$ROOT"
+mount "$ROOT" /mnt
+if [ "$MODE" = uefi ]; then mkdir -p /mnt/boot; mount "$ESP" /mnt/boot; fi
+
+say "Instaluji systém (potřebuje internet)"
+cat > /tmp/pacman-install.conf <<'C'
+[options]
+HoldPkg = pacman glibc
+Architecture = auto
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Optional
+NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/gtk-doc/* usr/share/locale/* !usr/share/locale/cs/* !usr/share/locale/locale.alias usr/include/* usr/share/gir-1.0/*
+[core]
+Include = /etc/pacman.d/mirrorlist
+[extra]
+Include = /etc/pacman.d/mirrorlist
+[odjezdy]
+SigLevel = Optional TrustAll
+Server = file:///srv/odjezdy-repo
+C
+pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
+  linux-firmware-radeon linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek \
+  linux-firmware-broadcom intel-ucode amd-ucode iwd nodejs odjezdy-board grub efibootmgr sudo nano
+genfstab -U /mnt >> /mnt/etc/fstab
+
+say "Nastavuji"
+echo "$HOST" > /mnt/etc/hostname
+ln -sf /usr/share/zoneinfo/Europe/Prague /mnt/etc/localtime
+echo "LANG=cs_CZ.UTF-8" > /mnt/etc/locale.conf
+sed -i 's/^#\(cs_CZ.UTF-8\)/\1/; s/^#\(en_US.UTF-8\)/\1/' /mnt/etc/locale.gen
+install -Dm644 /etc/systemd/network/20-ethernet.network /mnt/etc/systemd/network/20-ethernet.network
+arch-chroot /mnt locale-gen >/dev/null
+arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-timesyncd iwd odjezdy-board >/dev/null
+ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
+# service console on tty2: normal login
+if [ -z "$ROOTPW" ] && [ "$YES" -ne 1 ]; then
+  echo "Nastav heslo uživatele root (konzole na Alt+F2):"
+  arch-chroot /mnt passwd root
+elif [ -n "$ROOTPW" ]; then
+  echo "root:$ROOTPW" | arch-chroot /mnt chpasswd
+fi
+
+say "Instaluji zavaděč"
+if [ "$MODE" = uefi ]; then
+  arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=OdjezdyOS --removable
+else
+  arch-chroot /mnt grub-install --target=i386-pc "$DISK"
+fi
+sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 fbcon=nodefer"/; s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /mnt/etc/default/grub
+arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
+
+sync
+umount -R /mnt
+say "Hotovo. Vyjmi médium a restartuj (příkaz: reboot)."

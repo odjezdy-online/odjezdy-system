@@ -1,0 +1,14 @@
+[Unit]
+Description=Initializes Pacman keyring (installer needs it)
+After=time-sync.target
+Before=sshd.service
+ConditionFileNotEmpty=/usr/share/pacman/keyrings/archlinux.gpg
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/pacman-key --init
+ExecStart=/usr/bin/pacman-key --populate
+
+[Install]
+WantedBy=multi-user.target
