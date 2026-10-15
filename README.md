@@ -49,7 +49,7 @@ Vlastní vzhled zvládne kdokoli. Je to jeden JS soubor, návod je v **[docs/THE
 
 ## Stažení a aktualizace
 
-Hotová ISO jsou v **[Releases](https://github.com/odjezdy-online/odjezdy-system/releases)**. Sestavuje je GitHub Actions ([`release.yml`](.github/workflows/release.yml)) při každém tagu `vX.Y.Z` nebo ručně přes *Actions → Release → Run workflow*. Ke každému vydání patří i balíček aplikace `odjezdy-app.tar.gz` s kontrolním součtem.
+Hotová ISO jsou v **[Releases](https://github.com/odjezdy-online/odjezdy-system/releases)**. Sestavuje je GitHub Actions ([`release.yml`](.github/workflows/release.yml)) automaticky: stačí na `main` změnit číslo v [`app/VERSION`](app/VERSION) (např. `0.5.0`) a workflow vytvoří tag `v0.5.0`, sestaví ISO a zveřejní vydání. Verze, která už vydaná je, se přeskočí. Jde to i ručně tagem nebo přes *Actions → Release → Run workflow*. Ke každému vydání patří i balíček aplikace `odjezdy-app.tar.gz` s kontrolním součtem.
 
 Běžící tabule se jednou za 6 hodin podívá, jestli nevyšla nová verze. Když ano, ukáže obrazovku **Aktualizace** a zeptá se: *Aktualizovat / Později / Tuto verzi přeskočit*. Bez odpovědi se po 2 minutách vrátí na tabuli. Ručně jde aktualizace spustit v menu (`S` → *Aktualizace*). V nastavení se dá přepnout na *automaticky* nebo *vypnuté*.
 

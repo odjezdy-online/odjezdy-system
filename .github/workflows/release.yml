@@ -1,19 +1,23 @@
 # Builds the Odjezdy OS ISO and the app update bundle, and publishes them as a GitHub Release.
 #
-#   git tag v0.5.0 && git push origin v0.5.0      -> release "v0.5.0"
-#   Actions -> Release -> Run workflow (version)   -> same, without tagging by hand
+#   change app/VERSION on main (e.g. 0.5.0)        -> tag v0.5.0 + release, automatically
+#   git tag v0.5.0 && git push origin v0.5.0      -> same, by hand
+#   Actions -> Release -> Run workflow             -> same for the current app/VERSION (or a given one)
+# A version whose tag already exists is skipped, so re-runs and unrelated pushes do nothing.
 #
 # Running boards check releases/latest and offer odjezdy-app.tar.gz as an update (app/updater.js).
 name: Release
 
 on:
   push:
+    branches: [main]
+    paths: ['app/VERSION']
     tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version without "v" (e.g. 0.5.0)'
-        required: true
+        description: 'Version without "v" (empty = app/VERSION)'
+        required: false
 
 permissions:
   contents: write
@@ -28,45 +32,58 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, to see whether this version was already released
 
       - name: Version
         id: v
         run: |
           V="${{ github.event.inputs.version }}"
-          [ -z "$V" ] && V="${GITHUB_REF_NAME#v}"
+          [ -z "$V" ] && [ "$GITHUB_REF_TYPE" = tag ] && V="${GITHUB_REF_NAME#v}"
+          [ -z "$V" ] && V="$(tr -d '[:space:]' < app/VERSION)"
           echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || { echo "bad version: $V"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" != tag ] && git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+            echo "v$V already released, nothing to do"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "$V" > app/VERSION
 
       - uses: actions/setup-node@v4
+        if: steps.v.outputs.skip != 'true'
         with:
           node-version: 22
 
       - uses: actions/setup-python@v5
+        if: steps.v.outputs.skip != 'true'
         with:
           python-version: '3.12'
 
       - name: Tools
+        if: steps.v.outputs.skip != 'true'
         run: pip install pycdlib
 
       - name: Alpine downloads cache
+        if: steps.v.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: alpine/cache
           key: alpine-cache-${{ hashFiles('alpine/build.js') }}
 
       - name: Syntax check
+        if: steps.v.outputs.skip != 'true'
         run: |
           for f in app/*.js app/themes/*.js; do node --check "$f"; done
           node app/board.js --png /tmp/smoke.png --theme buse
 
       - name: App update bundle
+        if: steps.v.outputs.skip != 'true'
         run: |
           mkdir -p dist
           tar -czf dist/odjezdy-app.tar.gz -C app .
           (cd dist && sha256sum odjezdy-app.tar.gz > odjezdy-app.tar.gz.sha256)
 
       - name: Build ISO (Alpine)
+        if: steps.v.outputs.skip != 'true'
         run: |
           node alpine/build.js
           mv alpine/out/odjezdy-os.iso "dist/odjezdy-os-alpine-${{ steps.v.outputs.version }}-x86_64.iso"
@@ -74,6 +91,7 @@ jobs:
           ls -la dist
 
       - name: Publish release
+        if: steps.v.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.v.outputs.version }}
