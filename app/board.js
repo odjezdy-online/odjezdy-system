@@ -12,12 +12,20 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const os = require('os');
+const updater = require('./updater');
+
+// An accepted update lives in /var/lib/odjezdy/app; if it is newer than this copy, run that one instead.
+if (!process.argv.includes('--png') && !process.env.ODJEZDY_NO_UPDATE) {
+  const alt = updater.pick(__dirname, (s) => { try { fs.appendFileSync('/tmp/odjezdy.log', `[${new Date().toISOString()}] ${s}\n`); } catch {} });
+  if (alt) { require(path.join(alt, 'board.js')); return; }
+}
+const APP_VERSION = updater.versionOf(__dirname);
 
 const API = process.env.ODJEZDY_API || 'https://app.odjezdy.online';
 // Worldwide GTFS/GTFS-RT via Transitous (MOTIS 2). Open-source & non-commercial use only; requires a
 // User-Agent with contact and visible attribution to https://transitous.org/sources/ (shown in the status line).
 const TRANSITOUS = process.env.ODJEZDY_TRANSITOUS || 'https://api.transitous.org';
-const USER_AGENT = 'OdjezdyOS/0.3 (+https://github.com/odjezdy-online/odjezdy-system)';
+const USER_AGENT = `OdjezdyOS/${APP_VERSION} (+https://github.com/odjezdy-online/odjezdy-system)`;
 const APP_DIR = __dirname;
 const CONFIG_FILE = process.env.ODJEZDY_CONFIG || '/etc/odjezdy/config.json';
 const args = process.argv.slice(2);
@@ -805,6 +813,7 @@ function openStart(withCountdown) {
   items.push({ world: true, label: 'Hledat ve světě (Transitous)…' });
   items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
   items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
+  items.push({ update: true, label: state.update?.info ? `Aktualizovat na verzi ${state.update.info.version}…` : `Aktualizace (verze ${APP_VERSION})…` });
   state.start = { items, sel: 0, until: withCountdown ? Date.now() + START_TIMEOUT : 0 };
   state.mode = 'start';
 }
@@ -950,6 +959,7 @@ const SETTINGS = [
   { key: 'style', label: 'Styl bodů', values: () => ['theme', 'led', 'lcd'], show: (v) => ({ theme: 'podle vzhledu', led: 'LED body', lcd: 'LCD plné' })[v || 'theme'] },
   { key: 'brightness', label: 'Jas (procenta)', values: () => [100, 85, 70, 55, 40], show: (v) => String(v ?? 100) }, // '%' is a BUSE pictogram
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
+  { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
 ];
 function settingValue(it) {
@@ -1071,8 +1081,8 @@ function renderStart(m, t) {
     const idx = first + i, y = L.headerLine + 5 + i * L.rowH, on = idx === st.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { st.sel = idx; st.until = 0; }, click: () => { st.sel = idx; pickStart(it); } });
-    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings || it.world ? C.DIM : C.AMBER));
-    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings && !it.world) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
+    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings || it.world || it.update ? C.DIM : C.AMBER));
+    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings && !it.world && !it.update) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
   });
   const left = st.until ? Math.max(0, Math.ceil((st.until - Date.now()) / 1000)) : 0;
   const hint = (left ? `Spustím za ${left} s · ` : '') + 'šipky, Enter, číslo nebo piš';
@@ -1086,7 +1096,7 @@ function startKey(k) {
   else if (k === '\u001b[B') st.sel = Math.min(st.items.length - 1, st.sel + 1);
   else if (k === '\r') pickStart(st.items[st.sel]);
   else if (k === '\u001b') pickStart(st.items[0]);
-  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings && !st.items[+k].world) pickStart(st.items[+k]);
+  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings && !st.items[+k].world && !st.items[+k].update) pickStart(st.items[+k]);
   else if (k === 't' || k === 'T') {
     cycleTheme(1);
     const it = st.items.find((x) => x.theme);
@@ -1099,9 +1109,104 @@ function pickStart(it) {
   if (it.browse) { openBrowse(); return; }
   if (it.world) { state.mode = 'world'; state.world = { query: '', results: [], sel: 0, busy: false, err: null }; return; }
   if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
+  if (it.update) { openUpdate(true); return; }
   if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
   else chooseStop(it.stop);
+}
+
+// ---------------------------------------------------------------- self-update (GitHub Releases)
+// Setting "Aktualizace": ask (default) shows this screen when a new release appears, auto installs it,
+// off never checks. The screen falls back to the board after 2 minutes without an answer.
+const UPDATE_EVERY = 6 * 3600 * 1000;
+async function updateLoop() {
+  const mode = state.cfg.custom?.updates || 'ask';
+  if (mode !== 'off' && !state.update?.busy) {
+    try {
+      const info = await updater.check(APP_VERSION, USER_AGENT);
+      if (info) {
+        log('update available: ' + info.version);
+        state.update = { ...(state.update || {}), info };
+        if (mode === 'auto') runUpdate();
+        else if (state.cfg.skipVersion !== info.version && state.mode === 'board') openUpdate(false);
+      }
+    } catch (e) { log('update check: ' + e.message); }
+  }
+  setTimeout(updateLoop, UPDATE_EVERY);
+}
+function openUpdate(manual) {
+  const u = state.update = { ...(state.update || {}), sel: 0, until: manual ? 0 : Date.now() + 120000, err: null };
+  if (!u.busy) u.msg = null;
+  state.mode = 'update';
+  if (manual && !u.info && !u.busy) { // menu item: check right now
+    u.msg = 'Hledám novou verzi…';
+    updater.check(APP_VERSION, USER_AGENT).then((info) => {
+      u.info = info; u.msg = info ? null : `Máš nejnovější verzi (${APP_VERSION}).`;
+    }).catch((e) => { u.msg = null; u.err = 'Nelze zjistit: ' + (e.cause?.code || e.message); });
+  }
+}
+const UPDATE_CHOICES = [
+  { label: 'Aktualizovat', act: () => runUpdate() },
+  { label: 'Později', act: () => { state.mode = 'board'; } },
+  { label: 'Tuto verzi přeskočit', act: () => { state.cfg.skipVersion = state.update.info?.version; saveConfig(state.cfg); state.mode = 'board'; } },
+];
+async function runUpdate() {
+  const u = state.update;
+  if (!u?.info || u.busy) return;
+  u.busy = true; u.err = null; u.until = 0;
+  try {
+    const v = await updater.install(u.info, USER_AGENT, (s) => { u.msg = s; });
+    u.msg = `Verze ${v} nainstalována, restartuji tabuli…`;
+    log('update installed: ' + v);
+    setTimeout(() => shutdown(75), 2500); // non-zero: init (inittab respawn / systemd Restart=on-failure) starts it again
+  } catch (e) {
+    u.busy = false; u.msg = null;
+    u.err = 'Aktualizace selhala: ' + (e.cause?.code || e.message);
+    log('update failed: ' + (e.stack || e.message));
+  }
+}
+function renderUpdate(m, t) {
+  const W = m.cols, L = layout(m), u = state.update || {};
+  if (u.until && Date.now() > u.until) { state.mode = 'board'; return renderBoard(m, t); }
+  m.text('Aktualizace', 1, 1, 'big', C.AMBER);
+  m.textRight('nyní verze ' + APP_VERSION, W - 2, 3, 'small', C.DIM);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  let y = L.headerLine + 5;
+  if (u.info) {
+    m.text(fitText(`Je k dispozici nová verze ${u.info.version}`, 'normal', W - 4), 2, y, 'normal', C.WHITE);
+    y += L.rowH + 2;
+    const notes = u.info.notes.split('\n').map((l) => l.replace(/^[#*\-\s]+/, '').trim()).filter(Boolean);
+    const room = Math.max(0, Math.floor((m.rows - y - (L.rowH + 6) * 2 - L.sm - 6) / (L.sm + 2)));
+    for (const l of notes.slice(0, room)) { m.text(fitText('· ' + l, 'small', W - 6), 4, y, 'small', C.DIM); y += L.sm + 2; }
+  }
+  y = Math.max(y + 4, m.rows - (L.rowH + 4) * 2 - L.sm - 6);
+  if (u.err) m.text(fitText(u.err, 'small', W - 4), 2, y, 'small', C.RED);
+  else if (u.msg) m.text(fitText(u.msg, 'normal', W - 4), 2, y, 'normal', C.GREEN);
+  y += L.rowH + 4;
+  if (u.info && !u.busy) {
+    let x = 2;
+    UPDATE_CHOICES.forEach((c, i) => {
+      const on = i === u.sel, w = textWidth(c.label, 'normal') + 8;
+      if (x + w > W) return;
+      if (on) { m.hline(x, x + w - 1, y - 2, C.WHITE); m.hline(x, x + w - 1, y + L.rowH - 3, C.WHITE); }
+      m.text(c.label, x + 4, y, 'normal', on ? C.WHITE : C.AMBER);
+      const x0 = x;
+      hits.push({ x0, y0: y - 2, x1: x0 + w, y1: y + L.rowH, hover: () => { u.sel = i; u.until = 0; }, click: () => c.act() });
+      x += w + 6;
+    });
+  }
+  const left = u.until ? Math.max(0, Math.ceil((u.until - Date.now()) / 1000)) : 0;
+  m.text(fitText((left ? `Zpět na tabuli za ${left} s · ` : '') + 'Šipky, Enter · Esc později', 'small', W - 4), 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function updateKey(k) {
+  const u = state.update || {};
+  u.until = 0;
+  if (u.busy) return;
+  if (k === '\u001b' || k === 'q') { state.mode = 'board'; return; }
+  if (!u.info) return;
+  if (k === '\u001b[C' || k === '\u001b[B') u.sel = Math.min(UPDATE_CHOICES.length - 1, u.sel + 1);
+  else if (k === '\u001b[D' || k === '\u001b[A') u.sel = Math.max(0, u.sel - 1);
+  else if (k === '\r' || k === ' ') UPDATE_CHOICES[u.sel].act();
 }
 
 // ---------------------------------------------------------------- input
@@ -1110,6 +1215,7 @@ function onKey(k) {
   if (state.mode === 'browse') return browseKey(k);
   if (state.mode === 'settings') return settingsKey(k);
   if (state.mode === 'world') return worldKey(k);
+  if (state.mode === 'update') return updateKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -1211,6 +1317,7 @@ function tick() {
   else if (state.mode === 'browse') renderBrowse(m, t);
   else if (state.mode === 'settings') renderSettings(m, t);
   else if (state.mode === 'world') renderWorld(m, t);
+  else if (state.mode === 'update') renderUpdate(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else if (renderNativeBoard(t)) return;
@@ -1250,6 +1357,7 @@ async function main() {
       }
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 4000; }
+    if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: '- Nové vzhledy tabulí\n- Opravy kreslení na konzoli', size: 4200000 } }; openUpdate(false); }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
@@ -1281,6 +1389,8 @@ async function main() {
   pointer.x = screen.w / 2; pointer.y = screen.h / 2;
   startMouse();
   setInterval(tick, 66);
+  setTimeout(updateLoop, 45000); // first check once the network is surely up
+  if (__dirname === updater.UPDATE_DIR) setTimeout(() => updater.confirm(__dirname), 20000); // new version runs fine
 }
 
 main().catch((e) => { log('fatal: ' + e.stack); console.error(e); process.exit(1); });
