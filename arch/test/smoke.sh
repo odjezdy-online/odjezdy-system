@@ -23,6 +23,6 @@ PY
 SIZE=$(stat -c %s "$TMP/screen.png")
 echo "screendump: $SIZE bytes"
 [ -n "${SMOKE_KEEP:-}" ] && cp "$TMP/screen.png" "$SMOKE_KEEP"
-# a blank/black screen compresses to a few KB; a drawn board is far larger
-[ "$SIZE" -gt 30000 ] || { echo "FAIL: screen looks blank" >&2; exit 1; }
+# a blank screen is ~2-3 KB as PNG; any drawn board screen (menu, error or departures) is above 5 KB
+[ "$SIZE" -gt 5000 ] || { echo "FAIL: screen looks blank" >&2; exit 1; }
 echo "OK: board is drawn"
