@@ -1,4 +1,4 @@
-# Builds the Odjezdy OS ISO and the app update bundle, and publishes them as a GitHub Release.
+# Builds the Odjezdy OS ISOs (Alpine and Arch) and the app update bundle, and publishes them as a GitHub Release.
 #
 #   change app/VERSION on main (e.g. 0.5.0)        -> tag v0.5.0 + release, automatically
 #   git tag v0.5.0 && git push origin v0.5.0      -> same, by hand
@@ -87,6 +87,22 @@ jobs:
         run: |
           node alpine/build.js
           mv alpine/out/odjezdy-os.iso "dist/odjezdy-os-alpine-${{ steps.v.outputs.version }}-x86_64.iso"
+
+      - name: Build ISO (Arch)
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          arch/build.sh "$RUNNER_TEMP/arch-out"
+          mv "$RUNNER_TEMP"/arch-out/odjezdy-os-*.iso "dist/odjezdy-os-arch-${{ steps.v.outputs.version }}-x86_64.iso"
+
+      - name: Boot smoke test (Arch ISO)
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86
+          arch/test/smoke.sh "dist/odjezdy-os-arch-${{ steps.v.outputs.version }}-x86_64.iso" 90
+
+      - name: Checksums
+        if: steps.v.outputs.skip != 'true'
+        run: |
           (cd dist && sha256sum *.iso > SHA256SUMS && cat odjezdy-app.tar.gz.sha256 >> SHA256SUMS)
           ls -la dist
 
