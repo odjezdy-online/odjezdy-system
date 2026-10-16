@@ -94,6 +94,12 @@ jobs:
           arch/build.sh "$RUNNER_TEMP/arch-out"
           mv "$RUNNER_TEMP"/arch-out/odjezdy-os-*.iso "dist/odjezdy-os-arch-${{ steps.v.outputs.version }}-x86_64.iso"
 
+      - name: Enable KVM
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+
       - name: Boot smoke test (Arch ISO)
         if: steps.v.outputs.skip != 'true'
         run: |

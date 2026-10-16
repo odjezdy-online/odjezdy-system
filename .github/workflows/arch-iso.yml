@@ -18,6 +18,11 @@ jobs:
           shellcheck arch/build.sh arch/installer/odjezdy-install arch/pkg/odjezdy-board/odjezdy-board-run arch/test/smoke.sh
       - name: Build ISO
         run: arch/build.sh "$RUNNER_TEMP/out"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+
       - name: Boot smoke test (QEMU)
         run: |
           sudo apt-get install -y -qq qemu-system-x86
