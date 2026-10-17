@@ -14,6 +14,7 @@ const zlib = require('zlib');
 const os = require('os');
 const updater = require('./updater');
 const system = require('./system');
+const displays = require('./displays');
 
 // An accepted update lives in /var/lib/odjezdy/app; if it is newer than this copy, run that one instead.
 if (!process.argv.includes('--png') && !process.env.ODJEZDY_NO_UPDATE) {
@@ -31,6 +32,10 @@ const APP_DIR = __dirname;
 const CONFIG_FILE = process.env.ODJEZDY_CONFIG || '/etc/odjezdy/config.json';
 const args = process.argv.slice(2);
 const PNG_OUT = args.includes('--png') ? args[args.indexOf('--png') + 1] : null;
+// multi-display: children run "--display N --output fbN|kms:N" with their own ODJEZDY_CONFIG (displays.js)
+const DISPLAY = args.includes('--display') ? Number(args[args.indexOf('--display') + 1]) : 0;
+const IS_CHILD = DISPLAY > 0;
+let OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : 'fb0';
 
 // ---------------------------------------------------------------- fonts
 // BUSE panel faces (small/normal/big/line) + extra families in app/fonts/<id>.json (tools/fontgen.js),
@@ -284,8 +289,8 @@ function click() {
 }
 
 // ---------------------------------------------------------------- output: framebuffer or PNG
-function fbInfo() {
-  const base = '/sys/class/graphics/fb0';
+function fbInfo(dev = 'fb0') {
+  const base = `/sys/class/graphics/${dev}`;
   const [w, h] = fs.readFileSync(`${base}/virtual_size`, 'utf8').trim().split(',').map(Number);
   const bpp = Number(fs.readFileSync(`${base}/bits_per_pixel`, 'utf8').trim());
   let stride = w * (bpp / 8);
@@ -294,13 +299,18 @@ function fbInfo() {
 }
 
 class Screen {
-  constructor() {
+  // kms: { w, h, stride, sock } from displays.kmsConnect (frames go to odjezdy-kms instead of /dev/fbN)
+  constructor(kms = null) {
+    this.sock = null;
     if (PNG_OUT) {
       this.w = Number(process.env.W) || 1280; this.h = Number(process.env.H) || 720; this.bpp = 32; this.stride = this.w * 4; this.fd = null;
+    } else if (kms) {
+      Object.assign(this, { w: kms.w, h: kms.h, stride: kms.stride, bpp: 32, sock: kms.sock });
+      this.fd = -1; // not a file: flush() streams to the socket
     } else {
-      const i = fbInfo();
+      const i = fbInfo(OUTPUT);
       Object.assign(this, i);
-      this.fd = fs.openSync('/dev/fb0', 'r+');
+      this.fd = fs.openSync('/dev/' + OUTPUT, 'r+');
       fbSig = fbSignature(); // what we opened, so a later driver swap is noticed (checkFb)
     }
     // ~256 LED columns regardless of resolution
@@ -376,6 +386,10 @@ class Screen {
   // frame goes out anyway, in case console text was printed over the framebuffer.
   flush() {
     const { frame, stride } = this;
+    if (this.sock) { // odjezdy-kms takes whole frames; drop this one if the previous is still on its way
+      if (this.sock.writableLength === 0 && !this.sock.destroyed) this.sock.write(Buffer.from(frame));
+      return;
+    }
     if (!this.shown || ++this.flushes % 30 === 0 || this.flushes < 75) {
       fs.writeSync(this.fd, frame, 0, frame.length, 0);
       this.shown = Buffer.from(frame);
@@ -987,6 +1001,7 @@ function openStart(withCountdown) {
   items.push({ world: true, label: 'Hledat ve světě (Transitous)…' });
   items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
   items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
+  if (state.displays.length > 1) items.push({ displays: true, label: `Displeje (${state.displays.length})…` });
   if (system.wifi.available()) items.push({ wifi: true, label: 'Wi-Fi a síť…' });
   if ((LIVE || process.env.ODJEZDY_INSTALL_CMD) && system.installer.available()) items.push({ install: true, label: 'Nainstalovat do počítače…' });
   items.push({ update: true, label: state.update?.info ? `Aktualizovat na verzi ${state.update.info.version}…` : `Aktualizace (verze ${APP_VERSION})…` });
@@ -995,6 +1010,13 @@ function openStart(withCountdown) {
 }
 
 function chooseStop(stop) {
+  if (state.editDisplay > 0) { // picked from the Displeje screen for a child display
+    const n = state.editDisplay;
+    state.editDisplay = 0;
+    displayCfgSet(n, { stop: pickStop(stop) });
+    state.mode = 'displays';
+    return;
+  }
   const changed = stop.ids[0] !== state.cfg.stop.ids?.[0];
   state.cfg.stop = pickStop(stop);
   state.cfg.favorites = [pickStop(stop), ...(state.cfg.favorites || []).filter((f) => f.ids?.[0] !== stop.ids[0])].slice(0, 9);
@@ -1272,6 +1294,7 @@ function startKey(k) {
   if (k === '\u001b[A') st.sel = Math.max(0, st.sel - 1);
   else if (k === '\u001b[B') st.sel = Math.min(st.items.length - 1, st.sel + 1);
   else if (k === '\r') pickStart(st.items[st.sel]);
+  else if (k === '\u001b' && state.editDisplay > 0) { state.editDisplay = 0; state.mode = 'displays'; } // cancel picking for another display
   else if (k === '\u001b') pickStart(st.items[0]);
   else if (/^[1-9]$/.test(k) && st.items[+k]?.stop) pickStart(st.items[+k]);
   else if (k === 't' || k === 'T') {
@@ -1288,6 +1311,7 @@ function pickStart(it) {
   if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
   if (it.update) { openUpdate(true); return; }
   if (it.wifi) { openWifi(); return; }
+  if (it.displays) { state.mode = 'displays'; state.dispSel = 0; return; }
   if (it.install) { openInstall(); return; }
   if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
@@ -1666,6 +1690,48 @@ function wifiKey(k) {
   else if (k === 'r' || k === 'R') wifiRefresh();
 }
 
+// ---------------------------------------------------------------- displays (several monitors)
+function displayCfg(n) {
+  if (n === 0) return state.cfg;
+  try { return JSON.parse(fs.readFileSync(displays.displayConfig(n), 'utf8')); } catch { return { stop: state.cfg.stop, theme: state.cfg.theme }; }
+}
+function displayCfgSet(n, patch) {
+  if (n === 0) { Object.assign(state.cfg, patch); saveConfig(state.cfg); return; }
+  const c = { ...displayCfg(n), ...patch };
+  try {
+    fs.mkdirSync(path.dirname(displays.displayConfig(n)), { recursive: true });
+    fs.writeFileSync(displays.displayConfig(n), JSON.stringify(c, null, 2));
+    require('child_process').exec('command -v lbu >/dev/null && lbu commit 2>/dev/null');
+  } catch (e) { log('display config: ' + e.message); }
+  displays.reloadChild(n);
+}
+function renderDisplays(m, t) {
+  const W = m.cols, L = layout(m);
+  m.text('Displeje', 1, 1, 'big', C.AMBER);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  let y = L.headerLine + 5;
+  state.displays.forEach((d, i) => {
+    const c = displayCfg(i), on = i === state.dispSel, yy = y + i * (L.rowH + L.sm + 4);
+    if (on) m.text('>', 2, yy, 'normal', C.WHITE);
+    m.text(fitText(`${i + 1}. ${stopLabel(c.stop || {})}`, 'normal', W * 0.6), 9, yy, 'normal', on ? C.WHITE : C.AMBER);
+    m.textRight((THEMES.find((x) => x.id === c.theme) || THEMES[0]).name, W - 2, yy, 'small', C.DIM);
+    m.text(`${d.name}${d.w ? ` · ${d.w}×${d.h}` : ''}${i === 0 ? ' · hlavní (klávesnice, myš)' : ''}`, 9, yy + L.rowH, 'small', C.DIM);
+    hits.push({ x0: 0, y0: yy - 1, x1: W, y1: yy + L.rowH + L.sm, hover: () => { state.dispSel = i; }, click: () => { state.dispSel = i; displaysKey('\r'); } });
+  });
+  m.text('Enter = zastávka · T nebo šipky vlevo/vpravo = vzhled · Esc = zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function displaysKey(k) {
+  const n = state.dispSel;
+  if (k === '\u001b') return openStart(false);
+  if (k === '\u001b[A') state.dispSel = Math.max(0, n - 1);
+  else if (k === '\u001b[B') state.dispSel = Math.min(state.displays.length - 1, n + 1);
+  else if (k === '\r') { state.editDisplay = n; openStart(false); } // the stop pickers end in chooseStop
+  else if (k === 't' || k === 'T' || k === '\u001b[C' || k === '\u001b[D') {
+    const ids = THEMES.map((x) => x.id), cur = ids.indexOf(displayCfg(n).theme), step = k === '\u001b[D' ? -1 : 1;
+    displayCfgSet(n, { theme: ids[((cur < 0 ? 0 : cur) + step + ids.length) % ids.length] });
+  }
+}
+
 // ---------------------------------------------------------------- input
 function onKey(k) {
   if (state.mode === 'start') return startKey(k);
@@ -1675,6 +1741,7 @@ function onKey(k) {
   if (state.mode === 'update') return updateKey(k);
   if (state.mode === 'install') return installKey(k);
   if (state.mode === 'wifi') return wifiKey(k);
+  if (state.mode === 'displays') return displaysKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -1745,10 +1812,10 @@ function ownVtActive(force = false) {
 // text. Detect the swap (name/size change) and reopen; also force full repaints for the first seconds.
 let fbSig = null, fbCheckAt = 0;
 function fbSignature() {
-  try { const b = '/sys/class/graphics/fb0'; return ['name', 'virtual_size', 'bits_per_pixel', 'stride'].map((f) => { try { return fs.readFileSync(`${b}/${f}`, 'utf8').trim(); } catch { return ''; } }).join('|'); } catch { return null; }
+  try { const b = `/sys/class/graphics/${OUTPUT}`; return ['name', 'virtual_size', 'bits_per_pixel', 'stride'].map((f) => { try { return fs.readFileSync(`${b}/${f}`, 'utf8').trim(); } catch { return ''; } }).join('|'); } catch { return null; }
 }
 function checkFb() {
-  if (PNG_OUT || !screen || Date.now() - fbCheckAt < 1500) return;
+  if (PNG_OUT || !screen || screen.sock || Date.now() - fbCheckAt < 1500) return;
   fbCheckAt = Date.now();
   const sig = fbSignature();
   if (sig === fbSig) return;
@@ -1780,6 +1847,7 @@ function tick() {
   else if (state.mode === 'update') renderUpdate(m, t);
   else if (state.mode === 'install') renderInstall(m, t);
   else if (state.mode === 'wifi') renderWifi(m, t);
+  else if (state.mode === 'displays') renderDisplays(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else if (renderNativeBoard(t)) return;
@@ -1795,14 +1863,38 @@ function tick() {
 }
 
 function shutdown(code = 0) {
+  if (!IS_CHILD) { displays.stopChildren(); try { kmsProc?.kill('SIGTERM'); } catch {} }
   if (process.stdin.isTTY) { try { process.stdin.setRawMode(false); } catch {} }
   process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
   process.exit(code);
 }
 
+let kmsProc = null;
+state.displays = []; // primary: [{ index, type, name, w, h }]
+async function setupOutputs() {
+  if (PNG_OUT) return null;
+  if (IS_CHILD) return OUTPUT.startsWith('kms:') ? displays.kmsConnect(Number(OUTPUT.slice(4))) : null;
+  const d = displays.detect();
+  log(`displays: ${d.mode}${d.connectors ? ' (' + d.connectors.join(', ') + ')' : ''}`);
+  if (d.mode === 'fb') {
+    state.displays = d.outputs.map((o, i) => ({ ...o, index: i }));
+    OUTPUT = state.displays[0].dev;
+  } else if (d.mode === 'kms') {
+    try {
+      const k = await displays.startKms();
+      kmsProc = k.proc;
+      state.displays = k.outputs.map((o, i) => ({ ...o, index: i }));
+      displays.startChildren(state.displays, __filename, log);
+      return displays.kmsConnect(0);
+    } catch (e) { log('odjezdy-kms: ' + e.message + ', single display'); state.displays = []; }
+  }
+  if (state.displays.length > 1) displays.startChildren(state.displays, __filename, log);
+  return null;
+}
+
 async function main() {
   state.cfg = loadConfig();
-  screen = new Screen();
+  screen = new Screen(await setupOutputs());
   m = new Matrix(screen.cols, screen.rows);
   state.ip = localIp();
 
@@ -1839,6 +1931,17 @@ async function main() {
     return;
   }
 
+  if (IS_CHILD) {
+    process.on('SIGTERM', () => process.exit(0));
+    process.on('SIGHUP', () => { const was = state.cfg.stop?.ids?.[0]; state.cfg = loadConfig(); if (state.cfg.stop?.ids?.[0] !== was) { state.deps = []; state.lastOk = 0; kick(); } });
+    loadCache();
+    kick();
+    const alertsLoop = async () => { try { await refreshAlerts(); } catch {} setTimeout(alertsLoop, 120000); };
+    setTimeout(alertsLoop, 3000);
+    pointer.enabled = false;
+    setInterval(tick, 66);
+    return;
+  }
   process.stdout.write('\x1b[?25l\x1b[2J'); // hide console cursor
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
