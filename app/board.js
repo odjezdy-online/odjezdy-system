@@ -205,34 +205,44 @@ const CURSOR = [
 const pointer = { x: 0, y: 0, visible: false, last: 0, enabled: true };
 const hits = []; // clickable rows registered by the menus each frame: { x0, y0, x1, y1, hover, click }
 
+const mice = new Map(); // eventN -> { fd, absMax }
 function startMouse() {
   // Only pointing devices (mice, tablets, touchscreens): /proc/bus/input/devices lists a "mouseN"
-  // handler for them. Keyboards stay on the TTY.
-  let devs = [];
-  try {
-    devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/)
-      .filter((b) => /H: Handlers=.*\bmouse\d/.test(b) || /N: Name=.*touch/i.test(b))
-      .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
-  } catch { return; }
+  // handler for them. Keyboards stay on the TTY. Rescanned every 3 s: in VirtualBox/QEMU the USB tablet
+  // often appears after the board has started, and mice get plugged in later on real machines.
+  const scan = () => {
+    let devs = [];
+    try {
+      devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/)
+        .filter((b) => /H: Handlers=.*\bmouse\d/.test(b) || /N: Name=.*touch/i.test(b))
+        .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
+    } catch { return; }
+    for (const n of devs) {
+      if (mice.has(n)) continue;
+      try { mice.set(n, { fd: fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK), absMax: { x: 32767, y: 32767 } }); log(`input ${n}: listening`); }
+      catch (e) { log(`input ${n}: ${e.code}`); mice.set(n, { fd: null }); } // don't retry a device we may not open
+    }
+  };
+  scan();
+  setInterval(scan, 3000);
   // Non-blocking reads polled from a timer: a blocking read per device would occupy one of the
   // 4 libuv threadpool threads forever, starving DNS lookups (getaddrinfo) and other fs work.
   const buf = Buffer.alloc(24 * 64);
-  for (const n of devs) {
-    let fd;
-    try { fd = fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK); } catch (e) { log(`input ${n}: ${e.code}`); continue; }
-    log(`input ${n}: listening`);
-    const absMax = { x: 32767, y: 32767 };
-    setInterval(() => {
+  setInterval(() => {
+    for (const [n, dev] of mice) {
+      if (dev.fd === null) continue;
       for (;;) {
         let len;
-        try { len = fs.readSync(fd, buf, 0, buf.length, null); } catch (e) { if (e.code !== 'EAGAIN') log(`input ${n}: ${e.code}`); return; }
-        if (!len) return;
-        for (let o = 0; o + 24 <= len; o += 24) {
-          onInput(buf.readUInt16LE(o + 16), buf.readUInt16LE(o + 18), buf.readInt32LE(o + 20), absMax);
+        try { len = fs.readSync(dev.fd, buf, 0, buf.length, null); }
+        catch (e) {
+          if (e.code !== 'EAGAIN') { log(`input ${n}: ${e.code}, dropped`); try { fs.closeSync(dev.fd); } catch {} mice.delete(n); } // unplugged
+          break;
         }
+        if (!len) break;
+        for (let o = 0; o + 24 <= len; o += 24) onInput(buf.readUInt16LE(o + 16), buf.readUInt16LE(o + 18), buf.readInt32LE(o + 20), dev.absMax);
       }
-    }, 15);
-  }
+    }
+  }, 15);
 }
 
 function onInput(type, code, value, absMax) {
@@ -383,7 +393,7 @@ class Screen {
   }
   // arrow sprite drawn on top of the frame, the pixels below are restored after the write
   drawCursor(put, bytes) {
-    const scale = Math.max(1, Math.round(this.w / 900)); // 2x from ~1280 px wide
+    const scale = Math.max(1, Math.round(this.w / 640)); // 2x at 1280 px wide, 3x at 1920
     const W = CURSOR[0].length * scale, H = CURSOR.length * scale;
     const x0 = Math.round(pointer.x), y0 = Math.round(pointer.y);
     const saved = [];
@@ -786,8 +796,16 @@ function renderNativeBoard(t) {
   if (!vector || typeof th.renderNative !== 'function' || state.cfg.custom?.style === 'led') return false;
   if (state.cfg.custom?.font && state.cfg.custom.font !== 'theme') return false; // user forced an LED font
   // 5 fps is plenty for a static board (clock seconds, marquee); the cursor still moves at tick rate
-  if (Date.now() - lastNative < 180 && !pointer.visible) return true;
+  if (Date.now() - lastNative < 180) {
+    // between theme frames only the cursor moves: reuse the last canvas instead of re-rendering the theme
+    if (nativeCanvas && pointer.visible && (pointer.x !== pointer.drawnX || pointer.y !== pointer.drawnY)) {
+      pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
+      screen.drawCanvas(nativeCanvas);
+    }
+    return true;
+  }
   lastNative = Date.now();
+  pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
   if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
   try {
     th.renderNative(nativeCanvas, t, themeApi);
@@ -1119,7 +1137,7 @@ const SETTINGS = [
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, 5, false], show: (v) => (v === false ? 'vypnutá' : v === 5 ? 'každých 5 min' : 'každé 2 min') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
-  { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
+  { key: 'cursor', label: 'Kurzor myši', values: () => [true, 'always', false], show: (v) => (v === false ? 'vypnutý' : v === 'always' ? 'vždy viditelný' : 'při pohybu myši') },
 ];
 function settingValue(it) {
   return it.key === 'theme' ? currentTheme().id : (state.cfg.custom || {})[it.key];
@@ -1678,7 +1696,8 @@ function tick() {
   hits.length = 0;
   const userFont = state.cfg.custom?.font;
   faceFamily = userFont && userFont !== 'theme' ? (userFont === 'buse' ? null : userFont) : currentTheme().fonts || null;
-  if (pointer.visible && Date.now() - pointer.last > 5000) pointer.visible = false;
+  if (pointer.visible && state.cfg.custom?.cursor !== 'always' && Date.now() - pointer.last > 5000) pointer.visible = false;
+  if (state.cfg.custom?.cursor === 'always' && pointer.enabled) pointer.visible = true;
   if (state.mode === 'start' && state.start.until && Date.now() > state.start.until) pickStart(state.start.items[0]);
   if (state.mode === 'start') renderStart(m, t);
   else if (state.mode === 'browse') renderBrowse(m, t);
