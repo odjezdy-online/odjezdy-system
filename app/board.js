@@ -680,10 +680,43 @@ async function refreshAlerts() {
     if (a.validTo && new Date(a.validTo).getTime() < now) continue;
     for (const l of lines) {
       const named = /[A-Z]/i.test(l) && /\d/.test(l) && new RegExp(`(^|[^\\w])${l.replace(/[^\w]/g, '')}([^\\w]|$)`).test(a.title);
-      if (!byLine.has(l) && ((a.lines || []).map(String).includes(l) || named)) byLine.set(l, clean(a.title));
+      if (!byLine.has(l) && ((a.lines || []).map(String).includes(l) || named)) byLine.set(l, alertNotice(a));
     }
   }
   state.lineAlerts = byLine;
+}
+
+// What a line alert says on the board: "<kind>: <text>". The kind comes from the alert type (a DÚK
+// "Omezení provozu" is not a "výluka"); the text is the server's short summary when it has one, else the
+// title, and when the title is cut ("…"/"...") its place and the description's first sentences.
+function alertKind(a) {
+  const t = String(a.type || '').toLowerCase();
+  if (/výluk/.test(t)) return 'výluka';
+  if (/náhradní/.test(t)) return 'náhradní doprava';
+  if (/odklon|přetras/.test(t)) return 'odklon';
+  if (/omezení|zrušen/.test(t)) return 'omezení';
+  const txt = `${a.title || ''} ${a.description || ''}`.toLowerCase(); // untyped alert: guess from its text
+  if (/výluk/.test(txt)) return 'výluka';
+  if (/odklon|objížď|přetras/.test(txt)) return 'odklon';
+  if (/omezen|zrušen|neobsluh/.test(txt)) return 'omezení';
+  return 'upozornění';
+}
+function alertNotice(a) {
+  const clean = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const kind = alertKind(a);
+  if (a.summary) return { kind, text: clean(a.summary) };
+  let title = clean(a.title);
+  const cut = /(\.\.\.|…)$/.test(title);
+  title = title.replace(/\s*(\.\.\.|…)$/, '');
+  let text = title;
+  if ((cut || title.length < 60) && a.description) { // cut or terse title ("Telnice - Rallye Miriquidi"): add the why
+    // first two sentences of the description, at most ~220 characters
+    const sentences = clean(a.description).match(/[^.!?]+[.!?]+(\s|$)/g) || [clean(a.description)];
+    let d = '';
+    for (const x of sentences) { if ((d + x).length > 220 && d) break; d += x; }
+    text = `${title} – ${d.trim()}`;
+  }
+  return { kind, text };
 }
 
 // second-row notice under the destination (BUSE "zastávka" row, face 1): disruption / replacement service
@@ -696,7 +729,7 @@ function depNotice(d) {
   let color = C.AMBER;
   if (d.cancelled) { parts.push('spoj odpadá'); color = C.RED; }
   const alert = state.lineAlerts?.get(String(d.line));
-  if (alert) parts.push('výluka: ' + alert);
+  if (alert) parts.push(typeof alert === 'string' ? 'upozornění: ' + alert : `${alert.kind}: ${alert.text}`);
   else if (d.provider === 'PID' && /^X/i.test(String(d.line))) parts.push('náhradní doprava');
   return parts.length ? { text: parts.join(' · '), color } : null;
 }

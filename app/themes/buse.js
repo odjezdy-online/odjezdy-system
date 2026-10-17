@@ -63,7 +63,15 @@ module.exports = {
       used += tall ? rowH2 : L.rowH;
     }
     if (page.length && pages.length < MAX_PAGES) pages.push(page);
-    const pi = pages.length ? Math.floor(t / PAGE_MS) % pages.length : 0;
+    // a page stays until its longest scrolling notice has run through once (8 s minimum, 45 s maximum)
+    const SCROLL_MS = 45, GAP = 24, noticeW = colIn - minW - 4 - colDest;
+    const pageMs = pages.map((p) => Math.min(45000, Math.max(PAGE_MS, ...p.map((r) => {
+      const w = r.notice ? textWidth(r.notice.text, 'small') : 0;
+      return w > noticeW ? (w + GAP) * SCROLL_MS + 1500 : 0;
+    }))));
+    const cycle = pageMs.reduce((a, x) => a + x, 0) || 1;
+    let pi = 0, pageT = t % cycle;
+    while (pi < pages.length - 1 && pageT >= pageMs[pi]) { pageT -= pageMs[pi]; pi++; }
     if (pages.length > 1) {
       const label = `${pi + 1}/${pages.length}`;
       m.textRight(label, colIn - textWidth('Odjezd', 'small') - 8, L.colHead, 'small', C.DIM);
@@ -77,7 +85,7 @@ module.exports = {
       m.textRight(fitText(line, 'normal', lineW), 2 + lineW, midRow, 'normal', C.AMBER);
 
       let right;
-      if (mins <= 0) right = (Math.floor(t / 600) % 2) ? '' : 'teď';
+      if (mins <= 0) right = (Math.floor(t / 600) % 2) ? '' : '**'; // like real BUSE panels: blinking stars
       else if (mins < 60) right = `${mins} min`;
       else right = hhmm(new Date(depTime(d)));
       const delay = d.delayMinutes;
@@ -97,10 +105,10 @@ module.exports = {
         const ny = y + L.nor + 1, x0 = colDest, x1 = colIn - minW - 4;
         const w = textWidth(notice.text, 'small');
         if (w <= x1 - x0) m.text(notice.text, x0, ny, 'small', notice.color);
-        else { // too long: scroll inside the notice row only
-          const gap = 24, off = Math.floor(t / 45) % (w + gap);
+        else { // too long: scroll inside the notice row only, from the start of the page
+          const off = Math.max(0, Math.floor((pageT - 1000) / SCROLL_MS)) % (w + GAP);
           m.text(notice.text, x0 - off, ny, 'small', notice.color, x0, x1);
-          m.text(notice.text, x0 - off + w + gap, ny, 'small', notice.color, x0, x1);
+          m.text(notice.text, x0 - off + w + GAP, ny, 'small', notice.color, x0, x1);
         }
       }
       y += h;
