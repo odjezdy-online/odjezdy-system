@@ -514,6 +514,33 @@ const MOTIS_TYPE = {
 };
 const isTransitous = () => state.cfg.stop?.source === 'transitous';
 
+// Offline mode: the last good board is kept on disk, so after a reboot without network (or an API outage)
+// the board still shows the timetable it last knew; past departures drop off on their own (upcoming()).
+const CACHE_FILE = process.env.ODJEZDY_CACHE || (PNG_OUT ? null : '/var/lib/odjezdy/board-cache.json');
+const CACHE_MAX_AGE = 12 * 3600 * 1000;
+const cacheKey = () => `${state.cfg.stop.source || 'odjezdy'}:${(state.cfg.stop.ids || []).join(',')}`;
+let cacheSavedAt = 0;
+function saveCache() {
+  if (!CACHE_FILE || Date.now() - cacheSavedAt < 120000) return; // at most every 2 min (SD cards)
+  cacheSavedAt = Date.now();
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    const tmp = CACHE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ key: cacheKey(), lastOk: state.lastOk, deps: state.deps.slice(0, 80), alerts: state.alerts }));
+    fs.renameSync(tmp, CACHE_FILE);
+  } catch (e) { log('cache save: ' + e.message); }
+}
+function loadCache() {
+  if (!CACHE_FILE) return false;
+  try {
+    const c = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (c.key !== cacheKey() || !(Date.now() - c.lastOk < CACHE_MAX_AGE)) return false;
+    state.deps = c.deps || []; state.alerts = c.alerts || []; state.lastOk = c.lastOk; state.fromCache = true;
+    log(`offline cache: ${state.deps.length} departures from ${new Date(c.lastOk).toISOString()}`);
+    return true;
+  } catch { return false; }
+}
+
 async function refreshTransitous() {
   const id = state.cfg.stop.ids[0];
   const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60`);
@@ -541,17 +568,49 @@ async function refreshTransitous() {
   state.lineAlerts = byLine;
   state.lastOk = now;
   state.error = null;
+  state.fromCache = false;
+  saveCache();
+}
+
+// odjezdy.online /api/v2: all platforms of a stop in one request (stopIds=a,b,…, merged and deduped by
+// the server, alerts included). Older servers without it fall back to one /api/board/:id call per id.
+let apiV2 = null, apiV2At = 0;
+async function hasApiV2() {
+  if (apiV2 === null || Date.now() - apiV2At > 3600000) {
+    try { apiV2 = (await getJson('/api/v2/health', 8000)).apiVersion >= 2; }
+    catch (e) { if (!/^HTTP /.test(e.message)) throw e; apiV2 = false; } // network down: decide next time
+    apiV2At = Date.now();
+    log('odjezdy.online api v2: ' + apiV2);
+  }
+  return apiV2;
+}
+async function fetchBoardRows(ids) {
+  if (await hasApiV2()) {
+    try {
+      const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
+      const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+      state.v2Alerts = (j.alerts || []).map((a) => clean(a.title)).filter(Boolean);
+      return j.data || [];
+    } catch (e) {
+      if (!/^HTTP (404|400)/.test(e.message)) throw e;
+      apiV2 = false; apiV2At = Date.now(); // endpoint gone or rejects the ids: use the old API
+    }
+  }
+  state.v2Alerts = [];
+  const res = await Promise.allSettled(ids.map((id) => getJson('/api/board/' + encodeURIComponent(id))));
+  const ok = res.filter((r) => r.status === 'fulfilled');
+  if (!ok.length) throw res[0].reason;
+  return ok.flatMap((r) => r.value.data || []);
 }
 
 async function refreshBoard() {
   if (isTransitous()) return refreshTransitous();
   const ids = state.cfg.stop.ids.slice(0, 8);
   if (!ids.length) return;
-  const res = await Promise.allSettled(ids.map((id) => getJson('/api/board/' + encodeURIComponent(id))));
-  const ok = res.filter((r) => r.status === 'fulfilled');
-  if (!ok.length) throw res[0].reason;
+  const rows = await fetchBoardRows(ids);
   const now = Date.now(), seen = new Set(), all = [];
-  for (const r of ok) for (const d of r.value.data || []) {
+  for (const d of rows) {
+    if (!d.expectedTime) d.expectedTime = d.plannedTime;
     if (depTime(d) < now - 60000) continue;
     // richer fields from the odjezdy.online rewrite backend (absent on the old API -> no change)
     if (d.terminatesHere) continue; // the train ends here: an arrival, not a departure
@@ -564,8 +623,11 @@ async function refreshBoard() {
   }
   all.sort((a, b) => depTime(a) - depTime(b));
   state.deps = all;
+  if (state.v2Alerts?.length) state.alerts = [...new Set([...state.alerts, ...state.v2Alerts])].slice(0, 6);
   state.lastOk = now;
   state.error = null;
+  state.fromCache = false;
+  saveCache();
 }
 async function refreshAlerts() {
   if (isTransitous()) return; // alerts arrive together with the stop times
@@ -577,7 +639,8 @@ async function refreshAlerts() {
   state.alerts = list.filter((a) =>
     (a.stops || []).some((s) => norm(s) === name || name.includes(norm(s))) ||
     (a.provider === 'PID' && (a.lines || []).some((l) => lines.has(String(l))))
-  ).slice(0, 6).map((a) => clean(a.title));
+  ).map((a) => clean(a.title));
+  state.alerts = [...new Set([...state.alerts, ...(state.v2Alerts || [])])].slice(0, 6); // + alerts from /api/v2
   // line-level notices -> second (small-font) row under that departure.
   // Matched via a.lines, or by the line being named in the title — only for codes like "X12"
   // (letter+digit), plain numbers/letters would give false hits ("nástupiště B", "do 18. 10.").
@@ -695,6 +758,8 @@ const platformOf = (d) => {
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
   const src = isTransitous() ? 'data Transitous · transitous.org/sources' : 'data odjezdy.online';
+  // offline with older data: say clearly how old the shown timetable is
+  if ((state.error || state.fromCache) && state.lastOk) return `BEZ SPOJENÍ · poslední data ${hhmm(new Date(state.lastOk))}${state.error ? ' (' + state.error + ')' : ''} · ${src}`;
   if (state.error) return `bez spojení (${state.error}) · ${src}`;
   return state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))} · ${src}` : state.net;
 }
@@ -824,7 +889,7 @@ function chooseStop(stop) {
   state.cfg.favorites = [pickStop(stop), ...(state.cfg.favorites || []).filter((f) => f.ids?.[0] !== stop.ids[0])].slice(0, 9);
   saveConfig(state.cfg);
   state.mode = 'board';
-  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; kick(); }
+  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; state.fromCache = false; loadCache(); kick(); }
 }
 
 function startVisible(m) {
@@ -1345,7 +1410,8 @@ async function main() {
   state.ip = localIp();
 
   if (PNG_OUT) {
-    try { await refreshBoard(); await refreshAlerts(); } catch (e) { state.error = e.message; }
+    loadCache();
+    try { await refreshBoard(); await refreshAlerts(); } catch (e) { state.error = e.cause?.code || e.message; }
     t0 = Date.now() - 10000;
     if (args.includes('--setup')) { state.mode = 'setup'; state.query = 'hlavni nadr'; state.results = searchStops(state.query, setupMaxResults(m)); }
     if (args.includes('--browse')) { // e.g. --browse "ustecky/usti" walks the region picker for a screenshot
@@ -1381,6 +1447,7 @@ async function main() {
   if (!state.cfg.forced && !fs.existsSync(marker) && !args.includes('--no-menu')) openStart(true);
   try { fs.writeFileSync(marker, ''); } catch {}
 
+  loadCache();
   kick();
   const alertsLoop = async () => { try { await refreshAlerts(); } catch (e) { log('alerts: ' + e.message); } setTimeout(alertsLoop, 120000); };
   setTimeout(alertsLoop, 3000);

@@ -110,11 +110,12 @@ module.exports = {
     const fy = m.rows - L.footerH + 2;
     m.hline(0, W - 1, fy - 2, C.DIM);
     const parts = state.alerts.map((a) => '! ' + a);
-    const status = state.error ? `bez spojení (${state.error})` : (state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))}` : state.net);
-    parts.push(`Odjezdy OS · data odjezdy.online · ${status}${state.ip ? ' · IP ' + state.ip : ''} · S = změnit zastávku`);
+    // statusText carries the data source credit and the offline notice ("BEZ SPOJENÍ · poslední data …")
+    parts.push(`Odjezdy OS · ${api.statusText()}${state.ip ? ' · IP ' + state.ip : ''} · S = změnit zastávku`);
     const text = parts.join('   ·   ');
     const tw = textWidth(text, 'normal') + 40;
     const x = W - (Math.floor(t / 40) % (tw + W));
-    m.text(text, x, fy, 'normal', state.alerts.length ? C.AMBER : C.DIM);
+    const offline = (state.error || state.fromCache) && state.lastOk;
+    m.text(text, x, fy, 'normal', offline ? C.RED : state.alerts.length ? C.AMBER : C.DIM);
   },
 };
