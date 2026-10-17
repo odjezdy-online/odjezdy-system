@@ -1,0 +1,182 @@
+#!/usr/bin/env node
+'use strict';
+/*
+ * Wi-Fi for the board, a thin layer over iwd. Everything prints one JSON object.
+ *
+ *   odjezdy-wifi scan                  -> {"networks":[{"ssid","signal":0-100,"security":"open|psk|8021x","known","connected"}]}
+ *   odjezdy-wifi connect SSID [PASS]   -> {"ok":true,"ssid":"X"} | {"ok":false,"error":"..."}
+ *   odjezdy-wifi status                -> {"connected","ssid","ip","signal","device"}
+ *
+ * Reads iwd's D-Bus objects through busctl (structured JSON, no screen scraping);
+ * connecting goes through iwctl, which takes care of the passphrase agent.
+ * Runs as root. Without a Wi-Fi card: {"device":null,...} / an error.
+ */
+const { execFile } = require('child_process');
+
+const SVC = 'net.connman.iwd';
+const IF_STATION = 'net.connman.iwd.Station';
+const IF_DEVICE = 'net.connman.iwd.Device';
+const IF_NETWORK = 'net.connman.iwd.Network';
+
+function run(cmd, args, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) { err.stderr = stderr; reject(err); } else resolve(stdout);
+    });
+  });
+}
+
+const defaultBus = async args => JSON.parse(await run('busctl', ['--json=short', ...args]));
+const defaultIwctl = (args, timeout) => run('iwctl', args, timeout);
+const defaultIp = dev => run('ip', ['-j', '-4', 'addr', 'show', 'dev', dev]).then(JSON.parse);
+
+const prop = v => (v && typeof v === 'object' && 'data' in v ? v.data : v);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// iwd reports signal as 100 * dBm; -30 dBm and better is 100, -90 dBm and worse is 0
+function signalPercent(centiDbm) {
+  const dbm = Number(centiDbm) / 100;
+  if (!Number.isFinite(dbm)) return null;
+  return Math.max(0, Math.min(100, Math.round((dbm + 90) * 100 / 60)));
+}
+
+function securityOf(type) {
+  const t = String(type || '').toLowerCase();
+  if (t === 'open') return 'open';
+  if (t === '8021x') return '8021x';
+  return 'psk'; // psk, wep and anything else needing a password
+}
+
+function makeWifi({ bus = defaultBus, iwctl = defaultIwctl, ip = defaultIp, wait = sleep } = {}) {
+  async function objects() {
+    const r = await bus(['call', SVC, '/', 'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects']);
+    return (r.data && r.data[0]) || {};
+  }
+
+  // the first device that has a Station interface (= a usable Wi-Fi card)
+  async function findStation(objs) {
+    objs = objs || await objects();
+    for (const [path, ifaces] of Object.entries(objs)) {
+      if (ifaces[IF_STATION]) {
+        const dev = ifaces[IF_DEVICE] || {};
+        return { path, name: prop(dev.Name) || null, station: ifaces[IF_STATION] };
+      }
+    }
+    return null;
+  }
+
+  async function ordered(stationPath) {
+    const r = await bus(['call', SVC, stationPath, IF_STATION, 'GetOrderedNetworks']);
+    return (r.data && r.data[0]) || [];
+  }
+
+  function describe(objs, orderedList, connectedPath) {
+    const bySsid = new Map();
+    for (const [path, centi] of orderedList) {
+      const net = (objs[path] || {})[IF_NETWORK];
+      if (!net) continue;
+      const ssid = prop(net.Name);
+      if (!ssid) continue;
+      const entry = {
+        ssid,
+        signal: signalPercent(centi),
+        security: securityOf(prop(net.Type)),
+        known: !!prop(net.KnownNetwork) && prop(net.KnownNetwork) !== '/',
+        connected: prop(net.Connected) === true || path === connectedPath
+      };
+      const seen = bySsid.get(ssid);
+      if (!seen || (entry.signal ?? -1) > (seen.signal ?? -1)) bySsid.set(ssid, entry);
+    }
+    return [...bySsid.values()].sort((a, b) => (b.signal ?? -1) - (a.signal ?? -1));
+  }
+
+  async function scan() {
+    const st = await findStation();
+    if (!st) return { networks: [], device: null };
+    try { await bus(['call', SVC, st.path, IF_STATION, 'Scan']); } catch (_) { /* already scanning */ }
+    for (let i = 0; i < 16; i++) {
+      await wait(500);
+      const s = await bus(['get-property', SVC, st.path, IF_STATION, 'Scanning']);
+      if (prop(s) === false) break;
+    }
+    const objs = await objects();
+    const list = await ordered(st.path);
+    return { networks: describe(objs, list, prop((objs[st.path] || {})[IF_STATION]?.ConnectedNetwork)), device: st.name };
+  }
+
+  async function status() {
+    const st = await findStation();
+    if (!st) return { connected: false, ssid: null, ip: null, signal: null, device: null };
+    const objs = await objects();
+    const state = prop(objs[st.path][IF_STATION].State);
+    const connectedPath = prop(objs[st.path][IF_STATION].ConnectedNetwork);
+    if (state !== 'connected' || !connectedPath || connectedPath === '/') {
+      return { connected: false, ssid: null, ip: null, signal: null, device: st.name };
+    }
+    const ssid = prop(((objs[connectedPath] || {})[IF_NETWORK] || {}).Name) || null;
+    let signal = null;
+    try {
+      const hit = (await ordered(st.path)).find(([p]) => p === connectedPath);
+      if (hit) signal = signalPercent(hit[1]);
+    } catch (_) { /* leave null */ }
+    let addr = null;
+    try {
+      const info = await ip(st.name);
+      addr = info?.[0]?.addr_info?.[0]?.local || null;
+    } catch (_) { /* no address yet */ }
+    return { connected: true, ssid, ip: addr, signal, device: st.name };
+  }
+
+  async function connect(ssid, pass) {
+    if (!ssid) return { ok: false, error: 'Chybí název sítě.' };
+    const st = await findStation();
+    if (!st) return { ok: false, error: 'Žádná Wi-Fi karta.' };
+    const args = [];
+    if (pass) args.push('--passphrase', pass);
+    args.push('station', st.name, 'connect', ssid);
+    try {
+      await iwctl(args, 40000);
+    } catch (e) {
+      const text = String(e.stderr || e.stdout || e.message || '');
+      if (/not found/i.test(text)) return { ok: false, error: 'Síť nebyla nalezena.' };
+      if (/passphrase|authentication|operation failed|invalid|incorrect/i.test(text)) {
+        return { ok: false, error: pass ? 'Připojení se nezdařilo, zkontrolujte heslo.' : 'Síť vyžaduje heslo.' };
+      }
+      return { ok: false, error: 'Připojení se nezdařilo.' };
+    }
+    const now = await status();
+    return now.connected && now.ssid === ssid
+      ? { ok: true, ssid }
+      : { ok: false, error: 'Připojení se nezdařilo.' };
+  }
+
+  return { scan, status, connect, signalPercent };
+}
+
+async function main(argv) {
+  const [cmd, ...rest] = argv.filter(a => a !== '--json');
+  const wifi = makeWifi();
+  try {
+    let out;
+    if (cmd === 'scan') out = await wifi.scan();
+    else if (cmd === 'status') out = await wifi.status();
+    else if (cmd === 'connect') out = await wifi.connect(rest[0], rest[1]);
+    else {
+      console.error('Použití: odjezdy-wifi scan|status|connect SSID [HESLO]');
+      return 2;
+    }
+    process.stdout.write(JSON.stringify(out) + '\n');
+    return out.ok === false ? 1 : 0;
+  } catch (e) {
+    const msg = /busctl|org\.freedesktop\.DBus\.Error|ServiceUnknown/i.test(String(e.message))
+      ? 'Služba iwd neběží.' : (e.message || 'Chyba');
+    process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+    return 1;
+  }
+}
+
+if (require.main === module) {
+  main(process.argv.slice(2)).then(code => process.exit(code));
+}
+
+module.exports = { makeWifi, signalPercent, securityOf };

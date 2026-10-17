@@ -16,6 +16,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck arch/build.sh arch/installer/odjezdy-install arch/pkg/odjezdy-board/odjezdy-board-run arch/test/smoke.sh
+          node --test arch/test/
       - name: Build ISO
         run: arch/build.sh "$RUNNER_TEMP/out"
       - name: Enable KVM

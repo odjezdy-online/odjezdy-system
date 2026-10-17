@@ -6,10 +6,10 @@ pkgdesc='Framebuffer departure board for odjezdy.online (Odjezdy OS)'
 arch=('any')
 url='https://odjezdy.online'
 license=('MIT')
-depends=('nodejs')
+depends=('nodejs' 'iwd')
 # the app sources live next to arch/ in the repo; build.sh sets ODJEZDY_APP_DIR
-source=('odjezdy-board.service' 'odjezdy-board-run')
-sha256sums=('SKIP' 'SKIP')
+source=('odjezdy-board.service' 'odjezdy-board-run' 'odjezdy-wifi')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 package() {
   local app="${ODJEZDY_APP_DIR:-$startdir/../../../app}"
@@ -17,4 +17,5 @@ package() {
   cp -r "$app/." "$pkgdir/opt/odjezdy/"
   install -Dm644 odjezdy-board.service "$pkgdir/usr/lib/systemd/system/odjezdy-board.service"
   install -Dm755 odjezdy-board-run "$pkgdir/usr/bin/odjezdy-board-run"
+  install -Dm755 odjezdy-wifi "$pkgdir/usr/bin/odjezdy-wifi"
 }
