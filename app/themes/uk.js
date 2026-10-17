@@ -80,9 +80,11 @@ module.exports = {
     row(deps[0], 0, y, C.AMBER);
     y += nor + 2;
     const n = depNotice(deps[0]);
-    const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
-    m.text('Calling at:', 2, y, 'small', C.DIM);
-    marquee(m, api, calling, 2 + textWidth('Calling at: ', 'small'), W - 2, y, 'small', C.AMBER, t);
+    const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : ''; // no stop list: leave the row empty (a scrolling filler sentence was cut into nonsense like "řádu")
+    if (calling) {
+      m.text('Calling at:', 2, y, 'small', C.DIM);
+      marquee(m, api, calling, 2 + textWidth('Calling at: ', 'small'), W - 2, y, 'small', C.AMBER, t);
+    }
     y += nor + 4;
 
     // following trains, paged
@@ -149,12 +151,14 @@ function nativeUK(c, t, api) {
   row(deps[0], 0, 64 * s, 52);
   // "Calling at" ticker (clipped by painting the margins back to black)
   const n = depNotice(deps[0]);
-  const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : `Linka ${deps[0].line} · ${stopLabel(state.cfg.stop)} · zastavuje dle jízdního řádu`;
-  const lx = x0 + c.measure('Calling at: ', FU.med, 36 * s), tw = c.measure(calling, FU.med, 36 * s) + 80 * s;
-  const off = (t / 25) % (tw + (x1 - lx));
-  c.text(calling, x1 - off, 122 * s, { font: FU.med, size: 36 * s, color: AMBER });
-  c.rect(0, 88 * s, lx, 46 * s, [0, 0, 0]);
-  c.text('Calling at:', x0, 122 * s, { font: FU.med, size: 36 * s, color: DIMA });
+  const calling = n ? n.text : deps[0].via?.length ? deps[0].via.join(', ') + '.' : ''; // no stop list: leave the row empty (a scrolling filler sentence was cut into nonsense like "řádu")
+  if (calling) {
+    const lx = x0 + c.measure('Calling at: ', FU.med, 36 * s), tw = c.measure(calling, FU.med, 36 * s) + 80 * s;
+    const off = (t / 25) % (tw + (x1 - lx));
+    c.text(calling, x1 - off, 122 * s, { font: FU.med, size: 36 * s, color: AMBER });
+    c.rect(0, 88 * s, lx, 46 * s, [0, 0, 0]);
+    c.text('Calling at:', x0, 122 * s, { font: FU.med, size: 36 * s, color: DIMA });
+  }
   const rowH = 64 * s, top = 200 * s, per = Math.max(1, Math.floor((c.h - top - 120 * s) / rowH));
   const rest = deps.slice(1, 12).map((d, i) => ({ d, i: i + 1 }));
   const pages = Math.max(1, Math.ceil(rest.length / per)), pg = Math.floor(t / 6000) % pages;

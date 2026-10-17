@@ -1269,6 +1269,16 @@ function pickStart(it) {
 // Setting "Aktualizace": ask (default) shows this screen when a new release appears, auto installs it,
 // off never checks. The screen falls back to the board after 2 minutes without an answer.
 const UPDATE_EVERY = 6 * 3600 * 1000;
+// Live medium (Alpine diskless, archiso): / lives in RAM, so an installed update is gone after a reboot and the
+// board would ask again on every boot. There the new version is only offered in the menu, not popped up.
+const LIVE = (() => {
+  if (PNG_OUT) return false;
+  try {
+    if (fs.existsSync('/run/archiso')) return true;
+    const root = fs.readFileSync('/proc/mounts', 'utf8').split('\n').map((l) => l.split(' ')).find((f) => f[1] === '/');
+    return !!root && /^(tmpfs|rootfs|overlay|squashfs|erofs)$/.test(root[2]);
+  } catch { return false; }
+})();
 async function updateLoop() {
   const mode = state.cfg.custom?.updates || 'ask';
   if (mode !== 'off' && !state.update?.busy) {
@@ -1277,8 +1287,8 @@ async function updateLoop() {
       if (info) {
         log('update available: ' + info.version);
         state.update = { ...(state.update || {}), info };
-        if (mode === 'auto') runUpdate();
-        else if (state.cfg.skipVersion !== info.version && state.mode === 'board') openUpdate(false);
+        if (mode === 'auto' && !LIVE) runUpdate();
+        else if (!LIVE && state.cfg.skipVersion !== info.version && state.mode === 'board') openUpdate(false);
       }
     } catch (e) { log('update check: ' + e.message); }
   }
@@ -1325,6 +1335,10 @@ function renderUpdate(m, t) {
   if (u.info) {
     m.text(fitText(`Je k dispozici nová verze ${u.info.version}`, 'normal', W - 4), 2, y, 'normal', C.WHITE);
     y += L.rowH + 2;
+    if (LIVE) { // RAM-only system: say so, the lasting fix is the new ISO
+      m.text(fitText('Běží z živého média: aktualizace vydrží jen do restartu. Trvale: nové ISO z GitHub Releases.', 'small', W - 4), 2, y, 'small', C.YELLOW);
+      y += L.sm + 4;
+    }
     const notes = u.info.notes.split('\n').map((l) => l.replace(/^[#*\-\s]+/, '').trim()).filter(Boolean);
     const room = Math.max(0, Math.floor((m.rows - y - (L.rowH + 6) * 2 - L.sm - 6) / (L.sm + 2)));
     for (const l of notes.slice(0, room)) { m.text(fitText('· ' + l, 'small', W - 6), 4, y, 'small', C.DIM); y += L.sm + 2; }
