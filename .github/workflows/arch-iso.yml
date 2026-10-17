@@ -28,12 +28,13 @@ jobs:
           sudo apt-get install -y -qq qemu-system-x86
           # board needs network for departures but the screen is drawn without it; KVM is used when available
           SMOKE_KEEP="$RUNNER_TEMP/screen.png" arch/test/smoke.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso 90
-      - uses: actions/upload-artifact@v4
+      # archive: false -> the .iso itself is downloadable, not wrapped in a .zip
+      - uses: actions/upload-artifact@v7
         with:
-          name: odjezdy-os-iso
           path: ${{ runner.temp }}/out/*.iso
+          archive: false
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: boot-screenshot
           path: ${{ runner.temp }}/screen.png
+          archive: false
