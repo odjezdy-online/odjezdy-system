@@ -9,10 +9,14 @@
 #       {"error":"...","stage":"..."}        (and a non-zero exit code)
 #     everything the tools print goes to /var/log/odjezdy-install.log instead
 #
-# Options: --hostname NAME  --root-password PW  --yes  --json  --list-disks
+#   odjezdy-install --options --json         what the image offers: locales, keymaps, time zones
+#
+# Options: --hostname NAME  --root-password PW  --yes  --json  --list-disks  --options
+#          --locale cs_CZ.UTF-8  --keymap cz  --timezone Europe/Prague
 set -Eeuo pipefail
 
-DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""; JSON=0; LIST=0
+DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""; JSON=0; LIST=0; OPTS=0
+LOCALE="cs_CZ.UTF-8"; KEYMAP="cz"; TZ_NAME="Europe/Prague"
 LOG=/var/log/odjezdy-install.log
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -22,7 +26,11 @@ while [ $# -gt 0 ]; do
     --yes) YES=1; shift ;;
     --json) JSON=1; shift ;;
     --list-disks) LIST=1; shift ;;
-    -h|--help) sed -n 2,13p "$0"; exit 0 ;;
+    --options) OPTS=1; shift ;;
+    --locale) LOCALE="$2"; shift 2 ;;
+    --keymap) KEYMAP="$2"; shift 2 ;;
+    --timezone) TZ_NAME="$2"; shift 2 ;;
+    -h|--help) sed -n 2,17p "$0"; exit 0 ;;
     *) echo "Neznámý parametr: $1" >&2; exit 2 ;;
   esac
 done
@@ -75,6 +83,78 @@ if [ "$LIST" -eq 1 ]; then
   exit 0
 fi
 
+# --- what the image offers (for the installer UI) --------------------------
+
+# curated display names; anything else the image has is not offered
+LOCALE_NAMES='cs_CZ.UTF-8|Čeština
+sk_SK.UTF-8|Slovenčina
+en_US.UTF-8|English (US)
+en_GB.UTF-8|English (UK)
+de_DE.UTF-8|Deutsch
+pl_PL.UTF-8|Polski
+hu_HU.UTF-8|Magyar
+fr_FR.UTF-8|Français
+es_ES.UTF-8|Español
+it_IT.UTF-8|Italiano
+nl_NL.UTF-8|Nederlands
+pt_PT.UTF-8|Português
+sv_SE.UTF-8|Svenska
+da_DK.UTF-8|Dansk
+nb_NO.UTF-8|Norsk bokmål
+fi_FI.UTF-8|Suomi
+uk_UA.UTF-8|Українська
+ru_RU.UTF-8|Русский
+sl_SI.UTF-8|Slovenščina
+hr_HR.UTF-8|Hrvatski
+ro_RO.UTF-8|Română
+bg_BG.UTF-8|Български
+el_GR.UTF-8|Ελληνικά
+tr_TR.UTF-8|Türkçe'
+
+KEYMAP_NAMES='cz|Česká (QWERTZ)
+sk-qwertz|Slovenská (QWERTZ)
+sk-qwerty|Slovenská (QWERTY)
+us|Americká (US)
+uk|Britská (UK)
+de-latin1|Německá
+pl|Polská
+hu|Maďarská
+fr|Francouzská
+es|Španělská
+it|Italská
+sl|Slovinská
+hr|Chorvatská'
+
+keymap_exists() { find /usr/share/kbd/keymaps -name "$1.map*" 2>/dev/null | grep -q .; }
+locale_exists() { grep -qE "^#?${1//./\\.} UTF-8" /etc/locale.gen 2>/dev/null; }
+
+list_options() {
+  local first=1 id name
+  printf '{"locales":['
+  while IFS='|' read -r id name; do
+    locale_exists "$id" || continue
+    [ "$first" = 1 ] || printf ','; first=0
+    printf '{"id":%s,"name":%s}' "$(jstr "$id")" "$(jstr "$name")"
+  done <<<"$LOCALE_NAMES"
+  printf '],"keymaps":['
+  first=1
+  while IFS='|' read -r id name; do
+    keymap_exists "$id" || continue
+    [ "$first" = 1 ] || printf ','; first=0
+    printf '{"id":%s,"name":%s}' "$(jstr "$id")" "$(jstr "$name")"
+  done <<<"$KEYMAP_NAMES"
+  printf '],"timezones":['
+  first=1
+  { echo Europe/Prague; timedatectl list-timezones 2>/dev/null | grep -vx Europe/Prague | grep '^Europe/'
+    timedatectl list-timezones 2>/dev/null | grep -v '^Europe/'; } | while IFS= read -r id; do
+    [ "$first" = 1 ] || printf ','; first=0
+    jstr "$id"
+  done
+  printf ']}\n'
+}
+
+if [ "$OPTS" -eq 1 ]; then list_options; exit 0; fi
+
 [ "$(id -u)" -eq 0 ] || { echo "Spusť jako root." >&2; exit 1; }
 
 # JSON mode: fd 3 is the progress channel, everything else goes to the log
@@ -124,6 +204,11 @@ if [ "$YES" -ne 1 ]; then
   [ "$ans" = "$DISK" ] || { echo "Zrušeno."; exit 1; }
 fi
 
+[[ "$HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || fail "Neplatný název počítače: $HOST"
+locale_exists "$LOCALE" || fail "Jazyk $LOCALE není v obrazu k dispozici."
+keymap_exists "$KEYMAP" || fail "Rozložení klávesnice $KEYMAP není v obrazu k dispozici."
+[ -f "/usr/share/zoneinfo/$TZ_NAME" ] || fail "Časové pásmo $TZ_NAME neexistuje."
+
 if [ -d /sys/firmware/efi ]; then MODE=uefi; else MODE=bios; fi
 case "$DISK" in *nvme*|*mmcblk*|*loop*) P="p" ;; *) P="" ;; esac
 
@@ -167,24 +252,34 @@ Server = file:///srv/odjezdy-repo
 C
 pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
   linux-firmware-radeon linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek \
-  linux-firmware-broadcom intel-ucode amd-ucode iwd nodejs odjezdy-board grub efibootmgr sudo nano 2>&1 \
-  | while IFS= read -r line; do
-      printf '%s\n' "$line"
-      # "(12/345) installing foo" -> 0.10 .. 0.80
-      if [[ $line =~ ^\(\ *([0-9]+)/([0-9]+)\)\ installing ]]; then
-        n=${BASH_REMATCH[1]}; m=${BASH_REMATCH[2]}
-        emit pacstrap "$(awk -v n="$n" -v m="$m" 'BEGIN{printf "%.2f", 0.10 + 0.70*n/m}')" "Instaluji balíček $n z $m"
-      fi
-    done
+  linux-firmware-broadcom intel-ucode amd-ucode kbd iwd nodejs odjezdy-board grub efibootmgr sudo nano 2>&1 \
+  | {
+      # pacman prints no (n/m) counters when it is not on a terminal: the total comes from its
+      # "Packages (N) ..." line, then every "<pkg> downloading..." and "installing <pkg>..." is one step
+      total=0; dl=0; inst=0; phase=resolve
+      while IFS= read -r line; do
+        printf '%s\n' "$line"
+        if [[ $line =~ ^Packages\ \(([0-9]+)\) ]]; then total=${BASH_REMATCH[1]}
+        elif [[ $line == *"Retrieving packages"* ]]; then phase=download
+        elif [[ $line == "installing "* ]]; then
+          phase=install; inst=$((inst + 1))
+          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$inst" -v m="$total" 'BEGIN{printf "%.2f", 0.45 + 0.35*n/m}')" "Instaluji balíček $inst z $total"
+        elif [ "$phase" = download ] && [[ $line == *" downloading..." ]]; then
+          dl=$((dl + 1))
+          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$dl" -v m="$total" 'BEGIN{printf "%.2f", 0.10 + 0.35*(n>m?m:n)/m}')" "Stahuji balíček $dl z $total"
+        fi
+      done
+    }
 genfstab -U /mnt >> /mnt/etc/fstab
 
 # --- configuration --------------------------------------------------------
 
 emit config 0.82 "Nastavuji systém"
 echo "$HOST" > /mnt/etc/hostname
-ln -sf /usr/share/zoneinfo/Europe/Prague /mnt/etc/localtime
-echo "LANG=cs_CZ.UTF-8" > /mnt/etc/locale.conf
-sed -i 's/^#\(cs_CZ.UTF-8\)/\1/; s/^#\(en_US.UTF-8\)/\1/' /mnt/etc/locale.gen
+ln -sf "/usr/share/zoneinfo/$TZ_NAME" /mnt/etc/localtime
+echo "LANG=$LOCALE" > /mnt/etc/locale.conf
+printf 'KEYMAP=%s\nFONT=eurlatgr\n' "$KEYMAP" > /mnt/etc/vconsole.conf
+sed -i "s/^#\(${LOCALE//./\\.} UTF-8\)/\1/; s/^#\(en_US\.UTF-8 UTF-8\)/\1/" /mnt/etc/locale.gen
 install -Dm644 /etc/systemd/network/20-ethernet.network /mnt/etc/systemd/network/20-ethernet.network
 arch-chroot /mnt locale-gen >/dev/null
 arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-timesyncd iwd odjezdy-board >/dev/null
