@@ -1500,7 +1500,10 @@ function wifiConnect(net, pass) {
   const w = state.wifi;
   w.step = 'connecting'; w.err = null; w.msg = `Připojuji k ${net.ssid}…`;
   system.wifi.connect(net.ssid, pass).then((r) => {
-    if (r.ok) { w.msg = `Připojeno k ${net.ssid}`; w.step = 'list'; w.pass = ''; wifiRefresh(); kick(); }
+    if (r.ok) {
+      w.msg = `Připojeno k ${net.ssid}`; w.step = 'list'; w.pass = ''; wifiRefresh(); kick();
+      if (w.wizard) setTimeout(() => { if (state.mode === 'wifi') openStart(false); }, 2000); // wizard: on to the stop
+    }
     else { w.err = 'Nepřipojeno: ' + (r.error || 'neznámá chyba'); w.step = net.security === 'open' ? 'list' : 'pass'; w.msg = null; }
   }).catch((e) => { w.err = 'Nepřipojeno: ' + e.message; w.step = 'list'; w.msg = null; });
 }
@@ -1512,7 +1515,7 @@ function signalBars(m, x, y, sig, c) {
 }
 function renderWifi(m, t) {
   const W = m.cols, L = layout(m), w = state.wifi;
-  m.text('Wi-Fi a síť', 1, 1, 'big', C.AMBER);
+  m.text(w.wizard ? 'Vítej · připoj se k síti' : 'Wi-Fi a síť', 1, 1, 'big', C.AMBER);
   m.hline(0, W - 1, L.headerLine, C.DIM);
   let y = L.headerLine + 4;
   const st = w.status;
@@ -1755,6 +1758,12 @@ async function main() {
   const marker = '/tmp/odjezdy.booted';
   if (/(^|\s)odjezdy\.install=1(\s|$)/.test(system.cmdline()) && system.installer.available()) openInstall();
   else if (!state.cfg.forced && !fs.existsSync(marker) && !args.includes('--no-menu')) openStart(true);
+  // first run (nothing saved yet) without network but with a Wi-Fi card: Wi-Fi first, then the stop menu
+  if (!fs.existsSync(CONFIG_FILE) && state.mode === 'start' && system.wifi.available()) {
+    setTimeout(() => system.wifi.status().then((st) => {
+      if (st.device && !st.connected && !localIp() && state.mode === 'start') { openWifi(); state.wifi.wizard = true; }
+    }).catch(() => {}), 4000); // give DHCP on a cable a moment first
+  }
   try { fs.writeFileSync(marker, ''); } catch {}
 
   loadCache();
