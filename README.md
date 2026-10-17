@@ -29,8 +29,12 @@ Vzhled se přepíná klávesou **T** nebo v úvodním menu. Většina vzhledů s
 | ![](docs/theme-uk.png) | ![](docs/theme-db-city.png) | ![](docs/theme-sbb-rail.png) |
 | **RATP SIEL (Paříž)** | **JR (Japonsko)** | **Výběr podle kraje** |
 | ![](docs/theme-ratp.png) | ![](docs/theme-jr.png) | ![](docs/browse-0.png) |
-| **Mimořádnost** | **Nastavení vzhledu** | |
-| ![](docs/alert.png) | ![](docs/settings.png) | |
+| **NS (Nizozemsko)** | **Solari (překlápěcí tabule)** | **Neon (fiktivní)** |
+| ![](docs/theme-ns.png) | ![](docs/theme-solari.png) | ![](docs/theme-neon.png) |
+| **E-ink (fiktivní)** | **Zelená LED (fiktivní)** | **Mimořádnost** |
+| ![](docs/theme-eink.png) | ![](docs/theme-zelena.png) | ![](docs/alert.png) |
+| **Nastavení vzhledu** | | |
+| ![](docs/settings.png) | | |
 
 Při mimořádnosti (výluka zastávky, zrušený spoj) se přes jakýkoli vzhled pravidelně ukáže celoobrazovkové oznámení **Mimořádnost**. V nastavení jde vypnout.
 
@@ -67,7 +71,7 @@ app/            aplikace tabule (Node.js, bez závislostí)
   board.js      data, vykreslování LED/LCD matice, menu, výběr zastávky
   updater.js    aktualizace z GitHub Releases (ověření, rozbalení, návrat zpět)
   VERSION       verze aplikace (při vydání ji přepíše workflow podle tagu)
-  themes/       vzhledy tabulí (buse, uk, db, sbb, ratp, jr) a _util.js
+  themes/       vzhledy tabulí (buse, uk, db, sbb, ns, ratp, jr, solari, neon, eink, zelena), _util.js a _simple.js
   font.json     BUSE panelový font převedený z odjezdy.online (tools/fnt2json.js)
   stops.json.gz index 43 tisíc zastávek
   regions.json.gz  kraje → okresy → obce se zastávkami (tools/build-regions.js)

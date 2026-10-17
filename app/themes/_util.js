@@ -47,10 +47,17 @@ function marquee(m, api, text, x0, x1, y, size, c, t, speed = 40) {
 // or 'urban' (tram/bus/metro stop: line, destination, minutes). Real boards differ exactly like this,
 // e.g. DB station "Zeit | Zug | Ziel | Gleis" vs. city stop "Linie | Ziel | Abfahrt".
 const RAIL = new Set(['train', 'rail']);
+// With hysteresis: a mixed station (Ústí hl.n.: trains + buses) used to flip between the two layouts
+// whenever the next 20 departures tipped over 50 %. Now it switches only below 35 % / above 60 %.
+let lastKind = null, lastKey = null;
 function boardKind(deps) {
-  if (!deps.length) return 'urban';
-  const rail = deps.slice(0, 20).filter((d) => RAIL.has(d.type)).length;
-  return rail / Math.min(deps.length, 20) >= 0.5 ? 'rail' : 'urban';
+  if (!deps.length) return lastKind || 'urban';
+  const key = deps[0].stopId || deps[0].provider || '';
+  const ratio = deps.slice(0, 20).filter((d) => RAIL.has(d.type)).length / Math.min(deps.length, 20);
+  if (key !== lastKey || !lastKind) { lastKey = key; lastKind = ratio >= 0.5 ? 'rail' : 'urban'; }
+  else if (lastKind === 'rail' && ratio < 0.35) lastKind = 'urban';
+  else if (lastKind === 'urban' && ratio > 0.6) lastKind = 'rail';
+  return lastKind;
 }
 const isRail = (d) => RAIL.has(d.type);
 

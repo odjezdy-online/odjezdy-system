@@ -251,8 +251,8 @@ function onInput(type, code, value, absMax) {
   } else if (type === EV_KEY && value === 1 && (code === 0x110 || code === 0x14a)) { // BTN_LEFT / BTN_TOUCH
     pointer.visible = true; pointer.last = Date.now();
     click();
-  } else if (type === EV_KEY && value === 1 && code === 0x111) { // BTN_RIGHT = back
-    onKey('\u001b');
+  } else if (type === EV_KEY && value === 1 && code === 0x111) { // BTN_RIGHT = back; on the board: open the menu
+    if (state.mode === 'board') openStart(false); else onKey('\u001b');
   }
 }
 
@@ -269,8 +269,7 @@ function hitAt() {
 }
 function click() {
   const h = hitAt();
-  if (h) h.click();
-  else if (state.mode === 'board') openStart(false);
+  if (h) h.click(); // a plain left click on the departure board does nothing (right click opens the menu)
 }
 
 // ---------------------------------------------------------------- output: framebuffer or PNG
@@ -802,11 +801,9 @@ function renderNativeBoard(t) {
   return true;
 }
 function nativeDisruption(c, t, th) {
-  const list = currentDisruptions();
-  if (!list.length) return;
-  const PERIOD = 40000, SHOW = 9000, phase = t % PERIOD;
-  if (phase > SHOW) return;
-  const text = list[Math.floor(t / PERIOD) % list.length];
+  const slot = disruptionSlot(t);
+  if (!slot) return;
+  const text = slot.text;
   if (typeof th.renderAlertNative === 'function') return th.renderAlertNative(c, t, themeApi, text);
   const s = c.h / 720, font = th.nativeFont || 'FiraSans-Bold';
   const words = String(text).split(/\s+/), lines = [];
@@ -867,6 +864,18 @@ function wrapText(str, face, maxW, maxLines = 4) {
 // ---------------------------------------------------------------- disruption screen
 // Real boards interrupt the departure list with a full-width notice; every 40 s we show each current
 // disruption (stop alerts, cancelled trips) for 9 s. A theme may override it with renderAlert(m, t, api, text).
+// When the full-screen notice is up: once per period (setting: 2 min default, 5 min, off), all current
+// disruptions back to back, 9 s each. Returns { text, i, n, phase } or null.
+function disruptionSlot(t) {
+  const list = currentDisruptions();
+  const set = state.cfg.custom?.disruptions;
+  if (!list.length || set === false) return null;
+  const PERIOD = set === 5 ? 300000 : 120000, SHOW = 9000;
+  const phase = (t + PERIOD - 20000) % PERIOD; // first one ~20 s after start, not immediately
+  const i = Math.floor(phase / SHOW);
+  if (i >= list.length) return null;
+  return { text: list[i], i, n: list.length, phase: phase - i * SHOW };
+}
 function currentDisruptions() {
   const list = [...state.alerts];
   for (const d of upcoming().slice(0, 12)) {
@@ -875,12 +884,9 @@ function currentDisruptions() {
   return [...new Set(list)];
 }
 function renderDisruption(m, t) {
-  const list = currentDisruptions();
-  if (!list.length) return false;
-  const PERIOD = 40000, SHOW = 9000;
-  const phase = t % PERIOD;
-  if (phase > SHOW) return false;
-  const text = list[Math.floor(t / PERIOD) % list.length];
+  const slot = disruptionSlot(t);
+  if (!slot) return false;
+  const { text, phase } = slot, list = { length: slot.n };
   const th = currentTheme();
   if (typeof th.renderAlert === 'function') { th.renderAlert(m, t, themeApi, text); return true; }
   const W = m.cols, big = face('big').rows, nor = face('normal').rows;
@@ -893,7 +899,7 @@ function renderDisruption(m, t) {
   // blinking warning title, like "Störung" / "Mimořádnost" screens
   if (Math.floor(t / 700) % 2 === 0 || phase > 2800) m.textCenter('Mimořádnost', y0 + 4, 'big', C.RED);
   lines.forEach((l, i) => m.textCenter(l, y0 + big + 8 + i * (nor + 3), 'normal', C.WHITE));
-  if (list.length > 1) m.textRight(`${(Math.floor(t / PERIOD) % list.length) + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
+  if (list.length > 1) m.textRight(`${slot.i + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
   return true;
 }
 const themeApi = {
@@ -1107,7 +1113,7 @@ const SETTINGS = [
   { key: 'tint', label: 'Barva textu', values: () => Object.keys(TINT_NAMES), show: (v) => TINT_NAMES[v || 'theme'] },
   { key: 'style', label: 'Styl bodů', values: () => ['theme', 'led', 'lcd'], show: (v) => ({ theme: 'podle vzhledu', led: 'LED body', lcd: 'LCD plné' })[v || 'theme'] },
   { key: 'brightness', label: 'Jas (procenta)', values: () => [100, 85, 70, 55, 40], show: (v) => String(v ?? 100) }, // '%' is a BUSE pictogram
-  { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
+  { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, 5, false], show: (v) => (v === false ? 'vypnutá' : v === 5 ? 'každých 5 min' : 'každé 2 min') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
@@ -1522,7 +1528,7 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
-    if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 4000; }
+    if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: '- Nové vzhledy tabulí\n- Opravy kreslení na konzoli', size: 4200000 } }; openUpdate(false); }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }

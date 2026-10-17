@@ -204,7 +204,7 @@ class Canvas {
     return str.trimEnd() + '…';
   }
   // y is the BASELINE; align 'left' | 'right' | 'center'; returns the advance width
-  text(str, x, y, { font, size, color, align = 'left', maxW = 0 }) {
+  text(str, x, y, { font, size, color, align = 'left', maxW = 0, alpha = 1 }) {
     str = this.fit(str, font, size, maxW);
     if (!str) return 0;
     const m = textMask(font, size, str);
@@ -214,7 +214,7 @@ class Canvas {
     else if (align === 'center') x0 = x - m.adv / 2;
     const bx = Math.round(x0) + m.ox, by = Math.round(y) + m.oy;
     for (let yy = 0; yy < m.h; yy++) for (let xx = 0; xx < m.w; xx++) {
-      const a = m.alpha[yy * m.w + xx];
+      const a = alpha === 1 ? m.alpha[yy * m.w + xx] : m.alpha[yy * m.w + xx] * alpha; // alpha < 1: glow / faded text
       if (a) this.blend(bx + xx, by + yy, color, a);
     }
     return m.adv;
