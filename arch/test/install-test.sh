@@ -54,7 +54,8 @@ import json, sys
 lines = [l for l in sys.stdin.read().split("\n") if l.strip()]
 exit_line = [l for l in lines if l.startswith("INSTALL-EXIT-")]
 assert exit_line and exit_line[-1] == "INSTALL-EXIT-0", ("installer exit", exit_line)
-objs = [json.loads(l) for l in lines if not l.startswith("INSTALL-EXIT-")]
+# (UEFI firmware and GRUB also write to the serial port: only the JSON lines belong to the installer)
+objs = [json.loads(l) for l in lines if l.startswith("{")]
 assert objs, "no JSON output"
 assert all("error" not in o for o in objs), [o for o in objs if "error" in o]
 stages = {"partition", "format", "pacstrap", "config", "bootloader", "done"}
