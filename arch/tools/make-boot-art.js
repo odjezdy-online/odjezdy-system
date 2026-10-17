@@ -79,22 +79,46 @@ function drawText(c, text, size, x0, y0, pitch, { unlit = true } = {}) {
 
 function widthOf(text, size, pitch) { return textBitmap(text, size).cols.length * pitch; }
 
+// 8-bit palette PNG: syslinux's vesamenu is picky, and the art only spans the black -> amber axis anyway
+function pngIndexed({ w, h, px }) {
+  const pal = Array.from({ length: 256 }, (_, i) => BG.map((b, k) => Math.round(b + (ON[k] - b) * i / 255)));
+  const axis = ON.map((v, k) => v - BG[k]);
+  const norm = axis.reduce((a, v) => a + v * v, 0);
+  const raw = Buffer.alloc((w + 1) * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 3;
+      const t = [0, 1, 2].reduce((a, k) => a + (px[i + k] - BG[k]) * axis[k], 0) / norm;
+      raw[y * (w + 1) + 1 + x] = Math.max(0, Math.min(255, Math.round(t * 255)));
+    }
+  }
+  const plte = Buffer.from(pal.flat());
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 3;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr), pngChunk('PLTE', plte), pngChunk('IDAT', zlib.deflateSync(raw, { level: 9 })), pngChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+const crcTable = Array.from({ length: 256 }, (_, n) => {
+  let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;
+});
+function pngChunk(type, data) {
+  const crc = buf => { let c = 0xFFFFFFFF; for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type), data]);
+  const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+  return Buffer.concat([len, body, sum]);
+}
+
 function png({ w, h, px }) {
   const raw = Buffer.alloc((w * 3 + 1) * h);
   for (let y = 0; y < h; y++) {
     raw[y * (w * 3 + 1)] = 0;
     px.copy(raw, y * (w * 3 + 1) + 1, y * w * 3, (y + 1) * w * 3);
   }
-  const crcTable = Array.from({ length: 256 }, (_, n) => {
-    let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;
-  });
-  const crc = buf => { let c = 0xFFFFFFFF; for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type), data]);
-    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
-    return Buffer.concat([len, body, sum]);
-  };
+  const chunk = pngChunk;
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
   return Buffer.concat([
@@ -115,10 +139,10 @@ function panel(w, h, { titlePitch, tagPitch, top }) {
   return c;
 }
 
-function write(rel, canvas) {
+function write(rel, canvas, encode = png) {
   const file = path.join(ROOT, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, png(canvas));
+  fs.writeFileSync(file, encode(canvas));
   console.log(rel, fs.statSync(file).size, 'bytes');
 }
 
@@ -126,7 +150,7 @@ if (require.main === module) {
   // GRUB: 1920x1080 (scaled to whatever the firmware gives)
   write('arch/profile/grub/themes/odjezdy/background.png', panel(1920, 1080, { titlePitch: 12, tagPitch: 7, top: 90 }));
   // syslinux vesamenu: 640x480
-  write('arch/profile/syslinux/splash.png', panel(640, 480, { titlePitch: 4, tagPitch: 3, top: 36 }));
+  write('arch/profile/syslinux/splash.png', panel(640, 480, { titlePitch: 4, tagPitch: 3, top: 36 }), pngIndexed);
 }
 
-module.exports = { textBitmap, panel, png };
+module.exports = { textBitmap, panel, png, pngIndexed };

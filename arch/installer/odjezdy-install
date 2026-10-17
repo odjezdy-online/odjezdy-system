@@ -286,11 +286,10 @@ arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-time
 ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
 
 # what the user set up in the live session (stop, theme, Wi-Fi) goes with the system
-if [ -f /etc/odjezdy/config.json ]; then
-  install -Dm644 /etc/odjezdy/config.json /mnt/etc/odjezdy/config.json
-fi
-if [ -d /etc/odjezdy/themes ]; then
-  mkdir -p /mnt/etc/odjezdy && cp -a /etc/odjezdy/themes /mnt/etc/odjezdy/
+# (everything under /etc/odjezdy: config.json, display-N.json for extra screens, themes/)
+if [ -d /etc/odjezdy ]; then
+  mkdir -p /mnt/etc/odjezdy
+  cp -a /etc/odjezdy/. /mnt/etc/odjezdy/
 fi
 for f in /var/lib/iwd/*.psk /var/lib/iwd/*.open /var/lib/iwd/*.8021x; do
   [ -f "$f" ] || continue
