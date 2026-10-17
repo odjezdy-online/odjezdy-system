@@ -541,9 +541,8 @@ function loadCache() {
   } catch { return false; }
 }
 
-async function refreshTransitous() {
-  const id = state.cfg.stop.ids[0];
-  const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60`);
+async function refreshTransitous(id = state.cfg.stop.ids[0], radius = 0) {
+  const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60${radius ? '&radius=' + radius : ''}`);
   const now = Date.now(), alerts = new Map(), byLine = new Map();
   const text = (a) => (a.headerText || a.descriptionText || '').replace(/\s+/g, ' ').trim();
   state.deps = (j.stopTimes || []).map((x) => {
@@ -603,11 +602,39 @@ async function fetchBoardRows(ids) {
   return ok.flatMap((r) => r.value.data || []);
 }
 
+// Fallback when odjezdy.online is down: the same stop on Transitous (Czech PID/JDF/ČD feeds are there too),
+// found by name near the stop's coordinates from the local index. Remembered per stop for this run.
+const transitousIds = new Map();
+async function transitousStopFor(stop) {
+  const key = stop.ids?.[0];
+  if (!key) return null;
+  if (transitousIds.has(key)) return transitousIds.get(key);
+  const s = loadStops().find((x) => x.ids.includes(key));
+  if (!s?.lat) return null;
+  const text = s.name.replace(/,+/g, ' ').replace(/\s+/g, ' ').trim();
+  const j = await getJson(`${TRANSITOUS}/api/v1/geocode?text=${encodeURIComponent(text)}&type=STOP&place=${s.lat},${s.lng}`, 15000);
+  const km = (x) => Math.hypot((x.lat - s.lat) * 111.2, (x.lon - s.lng) * 111.2 * Math.cos((s.lat * Math.PI) / 180));
+  const hit = (j || []).find((x) => km(x) < 0.6); // best text match that is really this place
+  transitousIds.set(key, hit?.id || null);
+  log(`transitous fallback stop for ${s.name}: ${hit ? hit.id + ' ' + hit.name : 'none'}`);
+  return hit?.id || null;
+}
+
 async function refreshBoard() {
   if (isTransitous()) return refreshTransitous();
   const ids = state.cfg.stop.ids.slice(0, 8);
   if (!ids.length) return;
-  const rows = await fetchBoardRows(ids);
+  let rows;
+  try { rows = await fetchBoardRows(ids); }
+  catch (e) {
+    if (state.cfg.custom?.fallback === false) throw e;
+    const tid = await transitousStopFor(state.cfg.stop).catch(() => null);
+    if (!tid) throw e;
+    try { await refreshTransitous(tid, 100); } catch { throw e; } // both down: report the primary error
+    state.fallback = e.name === 'AbortError' ? 'časový limit' : (e.cause?.code || e.message);
+    return;
+  }
+  state.fallback = null;
   const now = Date.now(), seen = new Set(), all = [];
   for (const d of rows) {
     if (!d.expectedTime) d.expectedTime = d.plannedTime;
@@ -757,9 +784,10 @@ const platformOf = (d) => {
 };
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
-  const src = isTransitous() ? 'data Transitous · transitous.org/sources' : 'data odjezdy.online';
+  const src = isTransitous() ? 'data Transitous · transitous.org/sources'
+    : state.fallback ? `záložní data Transitous (odjezdy.online: ${state.fallback}) · transitous.org/sources` : 'data odjezdy.online';
   // offline with older data: say clearly how old the shown timetable is
-  if ((state.error || state.fromCache) && state.lastOk) return `BEZ SPOJENÍ · poslední data ${hhmm(new Date(state.lastOk))}${state.error ? ' (' + state.error + ')' : ''} · ${src}`;
+  if ((state.error || state.fromCache) && state.lastOk && !(state.fallback && !state.error)) return `BEZ SPOJENÍ · poslední data ${hhmm(new Date(state.lastOk))}${state.error ? ' (' + state.error + ')' : ''} · ${src}`;
   if (state.error) return `bez spojení (${state.error}) · ${src}`;
   return state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))} · ${src}` : state.net;
 }
@@ -889,7 +917,7 @@ function chooseStop(stop) {
   state.cfg.favorites = [pickStop(stop), ...(state.cfg.favorites || []).filter((f) => f.ids?.[0] !== stop.ids[0])].slice(0, 9);
   saveConfig(state.cfg);
   state.mode = 'board';
-  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; state.fromCache = false; loadCache(); kick(); }
+  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; state.fromCache = false; state.fallback = null; loadCache(); kick(); }
 }
 
 function startVisible(m) {
@@ -1025,6 +1053,7 @@ const SETTINGS = [
   { key: 'brightness', label: 'Jas (procenta)', values: () => [100, 85, 70, 55, 40], show: (v) => String(v ?? 100) }, // '%' is a BUSE pictogram
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
+  { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
 ];
 function settingValue(it) {
@@ -1411,7 +1440,8 @@ async function main() {
 
   if (PNG_OUT) {
     loadCache();
-    try { await refreshBoard(); await refreshAlerts(); } catch (e) { state.error = e.cause?.code || e.message; }
+    try { await refreshBoard(); } catch (e) { state.error = e.cause?.code || e.message; }
+    try { await refreshAlerts(); } catch {}
     t0 = Date.now() - 10000;
     if (args.includes('--setup')) { state.mode = 'setup'; state.query = 'hlavni nadr'; state.results = searchStops(state.query, setupMaxResults(m)); }
     if (args.includes('--browse')) { // e.g. --browse "ustecky/usti" walks the region picker for a screenshot
