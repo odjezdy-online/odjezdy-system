@@ -1487,8 +1487,12 @@ function installStart() {
   const st = state.inst, c = st.choice;
   st.step = 'progress'; st.ev = { stage: 'partition', progress: 0, message: 'Začínám…' };
   log(`install to ${c.disk} (${c.locale}, ${c.keymap}, ${c.timezone}, ${c.hostname})`);
-  system.installer.run(c.disk, (ev) => { st.ev = ev; }, ['--locale', c.locale, '--keymap', c.keymap, '--timezone', c.timezone, '--hostname', c.hostname])
-    .then(() => { st.step = 'done'; st.until = Date.now() + 60000; log('install done'); })
+  // random root password for the service console, shown once at the end. Letters only, without y/z (swapped
+  // on QWERTZ) and look-alikes, so it types the same on any of the offered layouts. No SSH is installed.
+  const abc = 'abcdefghjkmnprstuvwx'; // no q either: it looks like a 4 in the BUSE face
+  st.rootPass = [...require('crypto').randomBytes(10)].map((b) => abc[b % abc.length]).join('');
+  system.installer.run(c.disk, (ev) => { st.ev = ev; }, ['--locale', c.locale, '--keymap', c.keymap, '--timezone', c.timezone, '--hostname', c.hostname, '--root-password', st.rootPass])
+    .then(() => { st.step = 'done'; st.until = Date.now() + 120000; log('install done'); })
     .catch((e) => { st.step = 'error'; st.err = e.message; log('install failed: ' + e.message); });
 }
 function bar(m, x0, y, w, h, frac, c) {
@@ -1560,6 +1564,12 @@ function renderInstall(m, t) {
   } else if (st.step === 'done') {
     m.text('Hotovo, Odjezdy OS je nainstalovaný.', 2, y, 'normal', C.GREEN);
     y += L.rowH + 4;
+    if (st.rootPass) { // shown only here, once: the installed system has no other way to learn it
+      m.text('Servisní konzole (Alt+F2): uživatel root, heslo', 2, y, 'small', C.DIM);
+      m.text(st.rootPass, 2, y + L.sm + 3, 'normal', C.WHITE);
+      m.text('Opiš si ho, víckrát se neukáže.', 2, y + L.sm + L.rowH + 5, 'small', C.DIM);
+      y += L.sm + L.rowH + L.sm + 12;
+    }
     m.text('Vyjmi instalační médium a stiskni Enter pro restart.', 2, y, 'small', C.AMBER);
     const left = Math.max(0, Math.ceil((st.until - Date.now()) / 1000));
     m.text(`Restart sám za ${left} s`, 2, y + L.sm + 4, 'small', C.DIM);
@@ -1914,7 +1924,7 @@ async function main() {
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: '- Nové vzhledy tabulí\n- Opravy kreslení na konzoli', size: 4200000 } }; openUpdate(false); }
-    if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 42000; state.inst.rebooting = true; } }
+    if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
