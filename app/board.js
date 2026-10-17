@@ -13,6 +13,7 @@ const path = require('path');
 const zlib = require('zlib');
 const os = require('os');
 const updater = require('./updater');
+const system = require('./system');
 
 // An accepted update lives in /var/lib/odjezdy/app; if it is newer than this copy, run that one instead.
 if (!process.argv.includes('--png') && !process.env.ODJEZDY_NO_UPDATE) {
@@ -204,34 +205,44 @@ const CURSOR = [
 const pointer = { x: 0, y: 0, visible: false, last: 0, enabled: true };
 const hits = []; // clickable rows registered by the menus each frame: { x0, y0, x1, y1, hover, click }
 
+const mice = new Map(); // eventN -> { fd, absMax }
 function startMouse() {
   // Only pointing devices (mice, tablets, touchscreens): /proc/bus/input/devices lists a "mouseN"
-  // handler for them. Keyboards stay on the TTY.
-  let devs = [];
-  try {
-    devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/)
-      .filter((b) => /H: Handlers=.*\bmouse\d/.test(b) || /N: Name=.*touch/i.test(b))
-      .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
-  } catch { return; }
+  // handler for them. Keyboards stay on the TTY. Rescanned every 3 s: in VirtualBox/QEMU the USB tablet
+  // often appears after the board has started, and mice get plugged in later on real machines.
+  const scan = () => {
+    let devs = [];
+    try {
+      devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/)
+        .filter((b) => /H: Handlers=.*\bmouse\d/.test(b) || /N: Name=.*touch/i.test(b))
+        .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
+    } catch { return; }
+    for (const n of devs) {
+      if (mice.has(n)) continue;
+      try { mice.set(n, { fd: fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK), absMax: { x: 32767, y: 32767 } }); log(`input ${n}: listening`); }
+      catch (e) { log(`input ${n}: ${e.code}`); mice.set(n, { fd: null }); } // don't retry a device we may not open
+    }
+  };
+  scan();
+  setInterval(scan, 3000);
   // Non-blocking reads polled from a timer: a blocking read per device would occupy one of the
   // 4 libuv threadpool threads forever, starving DNS lookups (getaddrinfo) and other fs work.
   const buf = Buffer.alloc(24 * 64);
-  for (const n of devs) {
-    let fd;
-    try { fd = fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK); } catch (e) { log(`input ${n}: ${e.code}`); continue; }
-    log(`input ${n}: listening`);
-    const absMax = { x: 32767, y: 32767 };
-    setInterval(() => {
+  setInterval(() => {
+    for (const [n, dev] of mice) {
+      if (dev.fd === null) continue;
       for (;;) {
         let len;
-        try { len = fs.readSync(fd, buf, 0, buf.length, null); } catch (e) { if (e.code !== 'EAGAIN') log(`input ${n}: ${e.code}`); return; }
-        if (!len) return;
-        for (let o = 0; o + 24 <= len; o += 24) {
-          onInput(buf.readUInt16LE(o + 16), buf.readUInt16LE(o + 18), buf.readInt32LE(o + 20), absMax);
+        try { len = fs.readSync(dev.fd, buf, 0, buf.length, null); }
+        catch (e) {
+          if (e.code !== 'EAGAIN') { log(`input ${n}: ${e.code}, dropped`); try { fs.closeSync(dev.fd); } catch {} mice.delete(n); } // unplugged
+          break;
         }
+        if (!len) break;
+        for (let o = 0; o + 24 <= len; o += 24) onInput(buf.readUInt16LE(o + 16), buf.readUInt16LE(o + 18), buf.readInt32LE(o + 20), dev.absMax);
       }
-    }, 15);
-  }
+    }
+  }, 15);
 }
 
 function onInput(type, code, value, absMax) {
@@ -382,7 +393,7 @@ class Screen {
   }
   // arrow sprite drawn on top of the frame, the pixels below are restored after the write
   drawCursor(put, bytes) {
-    const scale = Math.max(1, Math.round(this.w / 900)); // 2x from ~1280 px wide
+    const scale = Math.max(1, Math.round(this.w / 640)); // 2x at 1280 px wide, 3x at 1920
     const W = CURSOR[0].length * scale, H = CURSOR.length * scale;
     const x0 = Math.round(pointer.x), y0 = Math.round(pointer.y);
     const saved = [];
@@ -785,8 +796,16 @@ function renderNativeBoard(t) {
   if (!vector || typeof th.renderNative !== 'function' || state.cfg.custom?.style === 'led') return false;
   if (state.cfg.custom?.font && state.cfg.custom.font !== 'theme') return false; // user forced an LED font
   // 5 fps is plenty for a static board (clock seconds, marquee); the cursor still moves at tick rate
-  if (Date.now() - lastNative < 180 && !pointer.visible) return true;
+  if (Date.now() - lastNative < 180) {
+    // between theme frames only the cursor moves: reuse the last canvas instead of re-rendering the theme
+    if (nativeCanvas && pointer.visible && (pointer.x !== pointer.drawnX || pointer.y !== pointer.drawnY)) {
+      pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
+      screen.drawCanvas(nativeCanvas);
+    }
+    return true;
+  }
   lastNative = Date.now();
+  pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
   if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
   try {
     th.renderNative(nativeCanvas, t, themeApi);
@@ -968,6 +987,8 @@ function openStart(withCountdown) {
   items.push({ world: true, label: 'Hledat ve světě (Transitous)…' });
   items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
   items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
+  if (system.wifi.available()) items.push({ wifi: true, label: 'Wi-Fi a síť…' });
+  if ((LIVE || process.env.ODJEZDY_INSTALL_CMD) && system.installer.available()) items.push({ install: true, label: 'Nainstalovat do počítače…' });
   items.push({ update: true, label: state.update?.info ? `Aktualizovat na verzi ${state.update.info.version}…` : `Aktualizace (verze ${APP_VERSION})…` });
   state.start = { items, sel: 0, until: withCountdown ? Date.now() + START_TIMEOUT : 0 };
   state.mode = 'start';
@@ -1116,7 +1137,7 @@ const SETTINGS = [
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, 5, false], show: (v) => (v === false ? 'vypnutá' : v === 5 ? 'každých 5 min' : 'každé 2 min') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
-  { key: 'cursor', label: 'Kurzor myši', values: () => [true, false], show: (v) => (v === false ? 'vypnutý' : 'zapnutý') },
+  { key: 'cursor', label: 'Kurzor myši', values: () => [true, 'always', false], show: (v) => (v === false ? 'vypnutý' : v === 'always' ? 'vždy viditelný' : 'při pohybu myši') },
 ];
 function settingValue(it) {
   return it.key === 'theme' ? currentTheme().id : (state.cfg.custom || {})[it.key];
@@ -1237,8 +1258,8 @@ function renderStart(m, t) {
     const idx = first + i, y = L.headerLine + 5 + i * L.rowH, on = idx === st.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
     hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { st.sel = idx; st.until = 0; }, click: () => { st.sel = idx; pickStart(it); } });
-    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (it.search || it.theme || it.browse || it.settings || it.world || it.update ? C.DIM : C.AMBER));
-    if (idx > 0 && idx <= 9 && !it.search && !it.theme && !it.browse && !it.settings && !it.world && !it.update) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
+    m.text(fitText(it.label, 'normal', W - 14), 9, y, 'normal', on ? C.WHITE : (!it.stop ? C.DIM : C.AMBER));
+    if (idx > 0 && idx <= 9 && it.stop) m.textRight(String(idx), W - 2, y, 'small', C.DIM);
   });
   const left = st.until ? Math.max(0, Math.ceil((st.until - Date.now()) / 1000)) : 0;
   const hint = (left ? `Spustím za ${left} s · ` : '') + 'šipky, Enter, číslo nebo piš';
@@ -1252,7 +1273,7 @@ function startKey(k) {
   else if (k === '\u001b[B') st.sel = Math.min(st.items.length - 1, st.sel + 1);
   else if (k === '\r') pickStart(st.items[st.sel]);
   else if (k === '\u001b') pickStart(st.items[0]);
-  else if (/^[1-9]$/.test(k) && st.items[+k] && !st.items[+k].search && !st.items[+k].theme && !st.items[+k].browse && !st.items[+k].settings && !st.items[+k].world && !st.items[+k].update) pickStart(st.items[+k]);
+  else if (/^[1-9]$/.test(k) && st.items[+k]?.stop) pickStart(st.items[+k]);
   else if (k === 't' || k === 'T') {
     cycleTheme(1);
     const it = st.items.find((x) => x.theme);
@@ -1266,6 +1287,8 @@ function pickStart(it) {
   if (it.world) { state.mode = 'world'; state.world = { query: '', results: [], sel: 0, busy: false, err: null }; return; }
   if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
   if (it.update) { openUpdate(true); return; }
+  if (it.wifi) { openWifi(); return; }
+  if (it.install) { openInstall(); return; }
   if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
   else chooseStop(it.stop);
@@ -1277,14 +1300,7 @@ function pickStart(it) {
 const UPDATE_EVERY = 6 * 3600 * 1000;
 // Live medium (Alpine diskless, archiso): / lives in RAM, so an installed update is gone after a reboot and the
 // board would ask again on every boot. There the new version is only offered in the menu, not popped up.
-const LIVE = (() => {
-  if (PNG_OUT) return false;
-  try {
-    if (fs.existsSync('/run/archiso')) return true;
-    const root = fs.readFileSync('/proc/mounts', 'utf8').split('\n').map((l) => l.split(' ')).find((f) => f[1] === '/');
-    return !!root && /^(tmpfs|rootfs|overlay|squashfs|erofs)$/.test(root[2]);
-  } catch { return false; }
-})();
+const LIVE = !PNG_OUT && system.isLive();
 async function updateLoop() {
   const mode = state.cfg.custom?.updates || 'ask';
   if (mode !== 'off' && !state.update?.busy) {
@@ -1379,6 +1395,277 @@ function updateKey(k) {
   else if (k === '\r' || k === ' ') UPDATE_CHOICES[u.sel].act();
 }
 
+// ---------------------------------------------------------------- installer (arch/: odjezdy-install --json)
+// Guided like archinstall: language -> keyboard -> time zone -> computer name -> disk -> summary + ANO ->
+// progress -> done (reboot). Boot entry "Nainstalovat do počítače" passes odjezdy.install=1, which opens it
+// right away. The keyboard layout is applied immediately (loadkeys), since everything typed later
+// (ANO, Wi-Fi password) goes through the console keymap.
+const GB = (b) => (b >= 1e12 ? (b / 1e12).toFixed(1) + ' TB' : Math.round(b / 1e9) + ' GB');
+const STAGES = { partition: 'Rozděluji disk', format: 'Formátuji', pacstrap: 'Kopíruji systém', bootloader: 'Instaluji zavaděč', config: 'Nastavuji systém', done: 'Hotovo' };
+const INSTALL_STEPS = ['locale', 'keymap', 'timezone', 'hostname', 'disks', 'confirm'];
+const STEP_TITLE = { locale: 'Jazyk systému', keymap: 'Rozložení klávesnice', timezone: 'Časové pásmo', hostname: 'Název počítače', disks: 'Disk pro instalaci', confirm: 'Shrnutí' };
+function openInstall() {
+  const st = state.inst = {
+    step: 'locale', opts: system.installer.defaultOptions(), sel: 0, filter: '', typed: '', ev: null, err: null, disks: null,
+    choice: { locale: 'cs_CZ.UTF-8', keymap: 'cz', timezone: 'Europe/Prague', hostname: 'odjezdy', disk: null },
+  };
+  state.mode = 'install';
+  system.installer.options().then((o) => { if (o) st.opts = o; }).catch(() => {});
+  system.installer.disks().then((d) => {
+    st.disks = d;
+    const i = d.findIndex((x) => !x.is_live_medium);
+    if (i >= 0) st.choice.disk = d[i].name;
+  }).catch((e) => { st.diskErr = 'Nelze zjistit disky: ' + e.message; });
+  installGo('locale');
+}
+// list for a list step, filtered by what was typed (time zones are many)
+function installList(st) {
+  const f = norm(st.filter || '');
+  if (st.step === 'locale') return st.opts.locales.map((x) => ({ id: x.id, label: x.name, note: x.id }));
+  if (st.step === 'keymap') return st.opts.keymaps.map((x) => ({ id: x.id, label: x.name, note: x.id }));
+  if (st.step === 'timezone') return st.opts.timezones.filter((z) => !f || norm(z).includes(f)).map((z) => ({ id: z, label: z.replace(/_/g, ' ') }));
+  if (st.step === 'disks') return (st.disks || []).map((d) => ({
+    id: d.name, label: `${d.name.replace('/dev/', '')}  ${GB(d.size_bytes)}  ${d.model || ''}`.trim(), disabled: d.is_live_medium,
+    note: d.is_live_medium ? 'instalační médium' : d.has_os ? 'obsahuje systém' : d.has_partitions ? 'obsahuje data' : d.removable ? 'vyměnitelný' : 'prázdný',
+    warn: d.has_os || d.has_partitions,
+  }));
+  return [];
+}
+function installGo(step) {
+  const st = state.inst;
+  st.step = step; st.filter = ''; st.err = null;
+  const list = installList(st), cur = st.choice[step === 'disks' ? 'disk' : step];
+  st.sel = Math.max(0, list.findIndex((x) => x.id === cur));
+  if (step === 'hostname') st.typed = st.choice.hostname;
+  if (step === 'confirm') st.typed = '';
+}
+function installNext(dir = 1) {
+  const st = state.inst, i = INSTALL_STEPS.indexOf(st.step);
+  if (dir < 0) return i <= 0 ? openStart(false) : installGo(INSTALL_STEPS[i - 1]);
+  if (st.step === 'locale' || st.step === 'keymap' || st.step === 'timezone' || st.step === 'disks') {
+    const it = installList(st)[st.sel];
+    if (!it || it.disabled) return;
+    st.choice[st.step === 'disks' ? 'disk' : st.step] = it.id;
+    if (st.step === 'keymap') system.setKeymap(it.id); // type the rest in the chosen layout
+  }
+  if (st.step === 'hostname') {
+    const h = st.typed.trim().toLowerCase();
+    if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(h)) { st.err = 'Jen malá písmena bez diakritiky, číslice a pomlčka.'; return; }
+    st.choice.hostname = h;
+  }
+  if (st.step === 'confirm') {
+    if (st.typed.trim().toUpperCase() !== 'ANO') { st.typed = ''; st.err = 'Napiš ANO (velkými nebo malými písmeny).'; return; }
+    return installStart();
+  }
+  installGo(INSTALL_STEPS[i + 1]);
+}
+function installStart() {
+  const st = state.inst, c = st.choice;
+  st.step = 'progress'; st.ev = { stage: 'partition', progress: 0, message: 'Začínám…' };
+  log(`install to ${c.disk} (${c.locale}, ${c.keymap}, ${c.timezone}, ${c.hostname})`);
+  system.installer.run(c.disk, (ev) => { st.ev = ev; }, ['--locale', c.locale, '--keymap', c.keymap, '--timezone', c.timezone, '--hostname', c.hostname])
+    .then(() => { st.step = 'done'; st.until = Date.now() + 60000; log('install done'); })
+    .catch((e) => { st.step = 'error'; st.err = e.message; log('install failed: ' + e.message); });
+}
+function bar(m, x0, y, w, h, frac, c) {
+  m.hline(x0, x0 + w - 1, y, C.DIM); m.hline(x0, x0 + w - 1, y + h - 1, C.DIM);
+  for (let yy = y + 1; yy < y + h - 1; yy++) { m.set(x0, yy, C.DIM); m.set(x0 + w - 1, yy, C.DIM); }
+  const fill = Math.round((w - 4) * Math.max(0, Math.min(1, frac)));
+  for (let yy = y + 2; yy < y + h - 2; yy++) for (let x = x0 + 2; x < x0 + 2 + fill; x++) m.set(x, yy, c);
+}
+function renderInstall(m, t) {
+  const W = m.cols, L = layout(m), st = state.inst;
+  const si = INSTALL_STEPS.indexOf(st.step);
+  m.text(si >= 0 ? STEP_TITLE[st.step] : 'Instalace do počítače', 1, 1, 'big', C.AMBER);
+  if (si >= 0) m.textRight(`krok ${si + 1} z ${INSTALL_STEPS.length}`, W - 2, 3, 'small', C.DIM);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  let y = L.headerLine + 5;
+  const hint = (txt) => m.text(fitText(txt, 'small', W - 4), 2, m.rows - L.sm - 1, 'small', C.DIM);
+  const cursor = Math.floor(t / 500) % 2 ? '_' : ' ';
+  const err = () => { if (st.err) { m.text(fitText(st.err, 'small', W - 4), 2, m.rows - L.sm * 2 - 5, 'small', C.RED); } };
+
+  if (['locale', 'keymap', 'timezone', 'disks'].includes(st.step)) {
+    if (st.step === 'disks') {
+      for (const l of wrapText('Odjezdy OS se nainstaluje na vybraný disk. Vše, co na něm je, bude smazáno.', 'small', W - 4, 2)) { m.text(l, 2, y, 'small', C.DIM); y += L.sm + 2; }
+      y += 3;
+      if (st.diskErr) m.text(fitText(st.diskErr, 'small', W - 4), 2, y, 'small', C.RED);
+      else if (!st.disks) m.text('Hledám disky…', 2, y, 'normal', C.DIM);
+      else if (!st.disks.length) m.text('Nenašel jsem žádný disk.', 2, y, 'normal', C.RED);
+    }
+    if (st.step === 'timezone') { m.text('Hledat:', 2, y, 'small', C.DIM); m.text(st.filter + cursor, 4 + textWidth('Hledat:', 'small'), y, 'small', C.WHITE); y += L.sm + 5; }
+    if (st.step === 'keymap') { m.text(fitText('Zkus si psát: ' + (st.filter || '…') + cursor, 'small', W - 4), 2, y, 'small', C.DIM); y += L.sm + 5; }
+    const list = installList(st);
+    const rows = Math.max(1, Math.floor((m.rows - y - L.sm * 2 - 10) / L.rowH));
+    const first = Math.min(Math.max(0, st.sel - rows + 1), Math.max(0, list.length - rows));
+    list.slice(first, first + rows).forEach((it, k) => {
+      const i = first + k, yy = y + k * L.rowH, on = i === st.sel;
+      if (on) m.text('>', 2, yy, 'normal', C.WHITE);
+      m.text(fitText(it.label, 'normal', W * 0.62), 9, yy, 'normal', it.disabled ? C.DIM : on ? C.WHITE : C.AMBER);
+      if (it.note) m.textRight(it.note, W - 2, yy, 'small', it.warn ? C.RED : C.DIM);
+      if (!it.disabled) hits.push({ x0: 0, y0: yy - 1, x1: W, y1: yy + L.rowH - 2, hover: () => { st.sel = i; }, click: () => { st.sel = i; installNext(); } });
+    });
+    err();
+    hint(st.step === 'timezone' ? 'Piš pro hledání · šipky, Enter = další · Esc = zpět' : 'Šipky, Enter = další · Esc = zpět');
+  } else if (st.step === 'hostname') {
+    for (const l of wrapText('Jméno, pod kterým bude počítač vidět v síti.', 'small', W - 4, 2)) { m.text(l, 2, y, 'small', C.DIM); y += L.sm + 2; }
+    y += 6;
+    m.text(st.typed + cursor, 9, y, 'normal', C.WHITE);
+    err();
+    hint('Enter = další · Esc = zpět');
+  } else if (st.step === 'confirm') {
+    const c = st.choice, d = (st.disks || []).find((x) => x.name === c.disk);
+    const rowsI = [['Jazyk', (st.opts.locales.find((x) => x.id === c.locale) || {}).name || c.locale], ['Klávesnice', (st.opts.keymaps.find((x) => x.id === c.keymap) || {}).name || c.keymap],
+      ['Časové pásmo', c.timezone], ['Název počítače', c.hostname], ['Disk', d ? `${d.name} · ${GB(d.size_bytes)} ${d.model || ''}` : c.disk]];
+    const lw = textWidth('Název počítače  ', 'small');
+    for (const [k, v] of rowsI) { m.text(k, 2, y + 1, 'small', C.DIM); m.text(fitText(v, 'normal', W - lw - 6), 2 + lw, y, 'normal', C.AMBER); y += L.rowH; }
+    y += 2;
+    for (const l of wrapText('Disk bude celý smazán, včetně všech dat a systémů na něm. Pro potvrzení napiš ANO a stiskni Enter:', 'small', W - 4, 2)) { m.text(l, 2, y, 'small', C.RED); y += L.sm + 2; }
+    y += 3;
+    m.text(st.typed + cursor, 9, y, 'normal', C.WHITE);
+    err();
+    hint('Esc = zpět a změnit');
+  } else if (st.step === 'progress') {
+    const ev = st.ev || {};
+    m.text(STAGES[ev.stage] || 'Instaluji', 2, y, 'normal', C.WHITE);
+    m.textRight(Math.round((ev.progress || 0) * 100) + ' z 100', W - 2, y, 'normal', C.AMBER); // '%' is a BUSE pictogram
+    y += L.rowH + 4;
+    bar(m, 2, y, W - 4, 12, ev.progress || 0, C.AMBER);
+    y += 18;
+    if (ev.message) m.text(fitText(ev.message, 'small', W - 4), 2, y, 'small', C.DIM);
+    hint('Nevypínej počítač. Podrobnosti: /var/log/odjezdy-install.log');
+  } else if (st.step === 'done') {
+    m.text('Hotovo, Odjezdy OS je nainstalovaný.', 2, y, 'normal', C.GREEN);
+    y += L.rowH + 4;
+    m.text('Vyjmi instalační médium a stiskni Enter pro restart.', 2, y, 'small', C.AMBER);
+    const left = Math.max(0, Math.ceil((st.until - Date.now()) / 1000));
+    m.text(`Restart sám za ${left} s`, 2, y + L.sm + 4, 'small', C.DIM);
+    if (!left && !st.rebooting) { st.rebooting = true; system.reboot(); }
+    hits.push({ x0: 0, y0: L.headerLine, x1: W, y1: m.rows, click: () => { st.rebooting = true; system.reboot(); } });
+    hint('Enter = restartovat');
+  } else { // error
+    m.text('Instalace se nepovedla', 2, y, 'normal', C.RED);
+    y += L.rowH + 2;
+    for (const l of wrapText(st.err || '', 'small', W - 4, 4)) { m.text(l, 2, y, 'small', C.AMBER); y += L.sm + 2; }
+    m.text('Podrobnosti: /var/log/odjezdy-install.log', 2, y + 4, 'small', C.DIM);
+    hint('Enter = zkusit znovu · Esc = zpět');
+  }
+}
+function installKey(k) {
+  const st = state.inst;
+  if (st.step === 'progress') return; // no way out while writing the disk
+  if (st.step === 'done') { if (k === '\r') { st.rebooting = true; system.reboot(); } return; }
+  if (st.step === 'error') { if (k === '\r') { st.step = 'confirm'; st.typed = ''; st.err = null; } else if (k === '\u001b') openStart(false); return; }
+  const back = k === '\u001b', del = k === '\u007f' || k === '\b', ch = k.length === 1 && k >= ' ' ? k : '';
+  if (back) return installNext(-1);
+  if (k === '\r') return installNext();
+  if (st.step === 'hostname' || st.step === 'confirm') {
+    if (del) st.typed = st.typed.slice(0, -1); else if (ch && st.typed.length < 63) st.typed += ch;
+    st.err = null;
+    return;
+  }
+  const list = installList(st);
+  const move = (d) => { for (let i = st.sel + d; i >= 0 && i < list.length; i += d) if (!list[i].disabled) { st.sel = i; return; } };
+  if (k === '\u001b[A') move(-1);
+  else if (k === '\u001b[B') move(1);
+  if (st.step === 'keymap' && (k === '\u001b[A' || k === '\u001b[B')) system.setKeymap(list[st.sel].id);
+  else if ((st.step === 'timezone' || st.step === 'keymap') && (ch || del)) {
+    st.filter = del ? st.filter.slice(0, -1) : (st.filter + ch).slice(-40);
+    if (st.step === 'timezone') st.sel = 0;
+  }
+}
+
+// ---------------------------------------------------------------- Wi-Fi (arch/: odjezdy-wifi --json)
+function openWifi() {
+  state.wifi = { step: 'list', nets: null, sel: 0, pass: '', show: false, status: null, err: null, msg: null };
+  state.mode = 'wifi';
+  wifiRefresh();
+}
+function wifiRefresh() {
+  const w = state.wifi;
+  system.wifi.status().then((st) => { w.status = st; }).catch(() => {});
+  w.scanning = true;
+  system.wifi.scan().then((n) => { w.nets = n; w.sel = Math.min(w.sel, Math.max(0, n.length - 1)); })
+    .catch((e) => { w.err = 'Hledání sítí selhalo: ' + e.message; })
+    .finally(() => { w.scanning = false; });
+}
+function wifiConnect(net, pass) {
+  const w = state.wifi;
+  w.step = 'connecting'; w.err = null; w.msg = `Připojuji k ${net.ssid}…`;
+  system.wifi.connect(net.ssid, pass).then((r) => {
+    if (r.ok) {
+      w.msg = `Připojeno k ${net.ssid}`; w.step = 'list'; w.pass = ''; wifiRefresh(); kick();
+      if (w.wizard) setTimeout(() => { if (state.mode === 'wifi') openStart(false); }, 2000); // wizard: on to the stop
+    }
+    else { w.err = 'Nepřipojeno: ' + (r.error || 'neznámá chyba'); w.step = net.security === 'open' ? 'list' : 'pass'; w.msg = null; }
+  }).catch((e) => { w.err = 'Nepřipojeno: ' + e.message; w.step = 'list'; w.msg = null; });
+}
+function signalBars(m, x, y, sig, c) {
+  for (let i = 0; i < 4; i++) {
+    const h = 3 + i * 2, lit = sig >= 15 + i * 25;
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < 2; xx++) m.set(x + i * 3 + xx, y + 9 - yy, lit ? c : C.DIM);
+  }
+}
+function renderWifi(m, t) {
+  const W = m.cols, L = layout(m), w = state.wifi;
+  m.text(w.wizard ? 'Vítej · připoj se k síti' : 'Wi-Fi a síť', 1, 1, 'big', C.AMBER);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  let y = L.headerLine + 4;
+  const st = w.status;
+  const line = !st ? 'Zjišťuji stav…' : st.device === null ? 'Wi-Fi karta nenalezena (kabel funguje sám)' : st.connected ? `Připojeno: ${st.ssid}${st.ip ? ' · IP ' + st.ip : ''}` : 'Nepřipojeno';
+  m.text(fitText(line, 'small', W - 4), 2, y, 'small', st?.connected ? C.GREEN : C.DIM);
+  y += L.sm + 5;
+  if (w.step === 'pass') {
+    const net = w.nets[w.sel];
+    m.text(fitText(`Heslo k síti ${net.ssid}:`, 'normal', W - 4), 2, y, 'normal', C.AMBER);
+    y += L.rowH + 2;
+    const shown = w.show ? w.pass : '*'.repeat(w.pass.length);
+    m.text(fitText(shown + (Math.floor(t / 500) % 2 ? '_' : ' '), 'normal', W - 12), 9, y, 'normal', C.WHITE);
+    if (w.err) m.text(fitText(w.err, 'small', W - 4), 2, y + L.rowH + 2, 'small', C.RED);
+    m.text('Enter = připojit · Tab = ukázat heslo · Esc = zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
+    return;
+  }
+  if (w.msg) { m.text(fitText(w.msg, 'normal', W - 4), 2, y, 'normal', w.step === 'connecting' ? C.AMBER : C.GREEN); y += L.rowH + 2; }
+  if (w.err) { m.text(fitText(w.err, 'small', W - 4), 2, y, 'small', C.RED); y += L.sm + 4; }
+  if (!w.nets) m.text(w.scanning ? 'Hledám sítě…' : '', 2, y, 'normal', C.DIM);
+  else if (!w.nets.length) m.text('Žádná síť v dosahu', 2, y, 'normal', C.DIM);
+  const rows = Math.max(1, Math.floor((m.rows - y - L.sm - 6) / L.rowH));
+  const first = Math.min(Math.max(0, w.sel - rows + 1), Math.max(0, (w.nets?.length || 0) - rows));
+  (w.nets || []).slice(first, first + rows).forEach((n, k) => {
+    const i = first + k, yy = y + k * L.rowH, on = i === w.sel;
+    if (on) m.text('>', 2, yy, 'normal', C.WHITE);
+    signalBars(m, 9, yy, n.signal, on ? C.WHITE : C.AMBER);
+    m.text(fitText(n.ssid || '(skrytá síť)', 'normal', W * 0.6), 24, yy, 'normal', on ? C.WHITE : C.AMBER);
+    const note = n.connected ? 'připojeno' : n.known ? 'uloženo' : n.security === 'open' ? 'otevřená' : n.security === '8021x' ? 'podniková' : 'heslo';
+    m.textRight(note, W - 2, yy, 'small', n.connected ? C.GREEN : C.DIM);
+    hits.push({ x0: 0, y0: yy - 1, x1: W, y1: yy + L.rowH - 2, hover: () => { w.sel = i; }, click: () => { w.sel = i; wifiPick(); } });
+  });
+  m.text('Šipky, Enter = připojit · R = hledat znovu · Esc = zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function wifiPick() {
+  const w = state.wifi, n = w.nets?.[w.sel];
+  if (!n || w.step === 'connecting') return;
+  if (n.security === '8021x') { w.err = 'Podnikové sítě (802.1X) zatím nejde nastavit tady, použij servisní konzoli.'; return; }
+  if (n.security === 'open' || n.known) wifiConnect(n, null);
+  else { w.step = 'pass'; w.pass = ''; w.err = null; }
+}
+function wifiKey(k) {
+  const w = state.wifi;
+  if (w.step === 'connecting') return;
+  if (w.step === 'pass') {
+    if (k === '\u001b') { w.step = 'list'; w.err = null; return; }
+    if (k === '\r') { if (w.pass) wifiConnect(w.nets[w.sel], w.pass); return; }
+    if (k === '\t') { w.show = !w.show; return; }
+    if (k === '\u007f' || k === '\b') w.pass = w.pass.slice(0, -1);
+    else if (k.length === 1 && k >= ' ' && w.pass.length < 63) w.pass += k;
+    return;
+  }
+  if (k === '\u001b') return openStart(false);
+  if (k === '\u001b[A') w.sel = Math.max(0, w.sel - 1);
+  else if (k === '\u001b[B') w.sel = Math.min((w.nets?.length || 1) - 1, w.sel + 1);
+  else if (k === '\r') wifiPick();
+  else if (k === 'r' || k === 'R') wifiRefresh();
+}
+
 // ---------------------------------------------------------------- input
 function onKey(k) {
   if (state.mode === 'start') return startKey(k);
@@ -1386,6 +1673,8 @@ function onKey(k) {
   if (state.mode === 'settings') return settingsKey(k);
   if (state.mode === 'world') return worldKey(k);
   if (state.mode === 'update') return updateKey(k);
+  if (state.mode === 'install') return installKey(k);
+  if (state.mode === 'wifi') return wifiKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -1481,13 +1770,16 @@ function tick() {
   hits.length = 0;
   const userFont = state.cfg.custom?.font;
   faceFamily = userFont && userFont !== 'theme' ? (userFont === 'buse' ? null : userFont) : currentTheme().fonts || null;
-  if (pointer.visible && Date.now() - pointer.last > 5000) pointer.visible = false;
+  if (pointer.visible && state.cfg.custom?.cursor !== 'always' && Date.now() - pointer.last > 5000) pointer.visible = false;
+  if (state.cfg.custom?.cursor === 'always' && pointer.enabled) pointer.visible = true;
   if (state.mode === 'start' && state.start.until && Date.now() > state.start.until) pickStart(state.start.items[0]);
   if (state.mode === 'start') renderStart(m, t);
   else if (state.mode === 'browse') renderBrowse(m, t);
   else if (state.mode === 'settings') renderSettings(m, t);
   else if (state.mode === 'world') renderWorld(m, t);
   else if (state.mode === 'update') renderUpdate(m, t);
+  else if (state.mode === 'install') renderInstall(m, t);
+  else if (state.mode === 'wifi') renderWifi(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else if (renderNativeBoard(t)) return;
@@ -1530,6 +1822,8 @@ async function main() {
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: '- Nové vzhledy tabulí\n- Opravy kreslení na konzoli', size: 4200000 } }; openUpdate(false); }
+    if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 42000; state.inst.rebooting = true; } }
+    if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
@@ -1555,7 +1849,14 @@ async function main() {
 
   // boot menu once per boot (not after a crash/respawn), unless the stop was fixed on the kernel cmdline
   const marker = '/tmp/odjezdy.booted';
-  if (!state.cfg.forced && !fs.existsSync(marker) && !args.includes('--no-menu')) openStart(true);
+  if (/(^|\s)odjezdy\.install=1(\s|$)/.test(system.cmdline()) && system.installer.available()) openInstall();
+  else if (!state.cfg.forced && !fs.existsSync(marker) && !args.includes('--no-menu')) openStart(true);
+  // first run (nothing saved yet) without network but with a Wi-Fi card: Wi-Fi first, then the stop menu
+  if (!fs.existsSync(CONFIG_FILE) && state.mode === 'start' && system.wifi.available()) {
+    setTimeout(() => system.wifi.status().then((st) => {
+      if (st.device && !st.connected && !localIp() && state.mode === 'start') { openWifi(); state.wifi.wizard = true; }
+    }).catch(() => {}), 4000); // give DHCP on a cable a moment first
+  }
   try { fs.writeFileSync(marker, ''); } catch {}
 
   loadCache();
