@@ -1431,7 +1431,7 @@ const STEP_TITLE = { locale: 'Jazyk systému', keymap: 'Rozložení klávesnice'
 function openInstall() {
   const st = state.inst = {
     step: 'locale', opts: system.installer.defaultOptions(), sel: 0, filter: '', typed: '', ev: null, err: null, disks: null,
-    choice: { locale: 'cs_CZ.UTF-8', keymap: 'cz', timezone: 'Europe/Prague', hostname: 'odjezdy', disk: null },
+    choice: { locale: 'cs_CZ.UTF-8', keymap: 'cz-qwertz', timezone: 'Europe/Prague', hostname: 'odjezdy', disk: null },
   };
   state.mode = 'install';
   system.installer.options().then((o) => { if (o) st.opts = o; }).catch(() => {});
