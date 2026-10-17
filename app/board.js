@@ -800,7 +800,9 @@ function nativeDisruption(c, t, th) {
   c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
   c.rect(60 * s, y0, 14 * s, h, [236, 0, 22]);
   c.text('Mimořádnost', 110 * s, y0 + 62 * s, { font, size: 40 * s, color: [236, 0, 22] });
-  shown.forEach((l, i) => c.text(l, 110 * s, y0 + 112 * s + i * 42 * s, { font: font.replace('Bold', 'Regular'), size: 30 * s, color: [20, 20, 40] }));
+  // body text in the regular cut of the theme font; not every family has one (Barlow Condensed: Medium)
+  const body = [font.replace(/-(Semi)?Bold$/, '-Regular'), font.replace(/-(Semi)?Bold$/, '-Medium'), font].find((f) => vector.findFont(f));
+  shown.forEach((l, i) => c.text(l, 110 * s, y0 + 112 * s + i * 42 * s, { font: body, size: 30 * s, color: [20, 20, 40] }));
 }
 
 function renderBoard(m, t) {
