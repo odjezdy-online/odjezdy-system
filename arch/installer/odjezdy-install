@@ -320,7 +320,7 @@ arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 sync
 umount -R /mnt
 if [ "$JSON" -eq 1 ]; then
-  emit done 1 "Hotovo. Vyjměte médium a restartujte."
+  emit "done" 1 "Hotovo. Vyjměte médium a restartujte."
 else
-  emit done 1 "Hotovo. Vyjmi médium a restartuj (příkaz: reboot)."
+  emit "done" 1 "Hotovo. Vyjmi médium a restartuj (příkaz: reboot)."
 fi

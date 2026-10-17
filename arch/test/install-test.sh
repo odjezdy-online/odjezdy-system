@@ -19,7 +19,7 @@ if [ "$MODE" = uefi ]; then
     for v in OVMF_VARS.4m.fd OVMF_VARS_4M.fd OVMF_VARS.fd; do [ -f "$d/$v" ] && VARS="$d/$v" && break; done
     [ -n "$CODE" ] && [ -n "$VARS" ] && break
   done
-  [ -n "$CODE" ] && [ -n "$VARS" ] || { echo "OVMF firmware not found" >&2; exit 1; }
+  if [ -z "$CODE" ] || [ -z "$VARS" ]; then echo "OVMF firmware not found" >&2; exit 1; fi
   cp "$VARS" "$TMP/vars.fd"
   FW=(-drive "if=pflash,format=raw,readonly=on,file=$CODE" -drive "if=pflash,format=raw,file=$TMP/vars.fd")
 fi
