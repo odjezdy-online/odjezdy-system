@@ -16,7 +16,7 @@
 set -Eeuo pipefail
 
 DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""; JSON=0; LIST=0; OPTS=0
-LOCALE="cs_CZ.UTF-8"; KEYMAP="cz"; TZ_NAME="Europe/Prague"
+LOCALE="cs_CZ.UTF-8"; KEYMAP="cz-qwertz"; TZ_NAME="Europe/Prague"
 LOG=/var/log/odjezdy-install.log
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -111,7 +111,8 @@ bg_BG.UTF-8|Български
 el_GR.UTF-8|Ελληνικά
 tr_TR.UTF-8|Türkçe'
 
-KEYMAP_NAMES='cz|Česká (QWERTZ)
+KEYMAP_NAMES='cz-qwertz|Česká (QWERTZ)
+cz|Česká (QWERTY)
 sk-qwertz|Slovenská (QWERTZ)
 sk-qwerty|Slovenská (QWERTY)
 us|Americká (US)
