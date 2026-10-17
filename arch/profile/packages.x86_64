@@ -15,6 +15,7 @@ linux-firmware-mediatek
 linux-firmware-broadcom
 # network: systemd-networkd/resolved/timesyncd for Ethernet, iwd for Wi-Fi
 iwd
+kbd
 # the board itself
 nodejs
 odjezdy-board

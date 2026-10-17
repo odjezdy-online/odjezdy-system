@@ -15,7 +15,8 @@ jobs:
       - name: Lint scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck arch/build.sh arch/installer/odjezdy-install arch/pkg/odjezdy-board/odjezdy-board-run arch/test/smoke.sh
+          shellcheck arch/build.sh arch/installer/odjezdy-install arch/pkg/odjezdy-board/odjezdy-board-run arch/test/smoke.sh arch/test/install-test.sh
+          node --test arch/test/*.test.js
       - name: Build ISO
         run: arch/build.sh "$RUNNER_TEMP/out"
       - name: Enable KVM
@@ -28,6 +29,12 @@ jobs:
           sudo apt-get install -y -qq qemu-system-x86
           # board needs network for departures but the screen is drawn without it; KVM is used when available
           SMOKE_KEEP="$RUNNER_TEMP/screen.png" arch/test/smoke.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso 90
+      - name: Install test (BIOS and UEFI)
+        run: |
+          sudo apt-get install -y -qq ovmf
+          for mode in bios uefi; do
+            SMOKE_KEEP="$RUNNER_TEMP/installed-$mode.png" arch/test/install-test.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso $mode
+          done
       # archive: false -> the .iso itself is downloadable, not wrapped in a .zip
       - uses: actions/upload-artifact@v7
         with:

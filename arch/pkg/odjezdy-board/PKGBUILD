@@ -6,10 +6,19 @@ pkgdesc='Framebuffer departure board for odjezdy.online (Odjezdy OS)'
 arch=('any')
 url='https://odjezdy.online'
 license=('MIT')
-depends=('nodejs')
+depends=('nodejs' 'iwd' 'libdrm')
+makedepends=('gcc' 'pkgconf' 'libdrm')
 # the app sources live next to arch/ in the repo; build.sh sets ODJEZDY_APP_DIR
-source=('odjezdy-board.service' 'odjezdy-board-run')
-sha256sums=('SKIP' 'SKIP')
+source=('odjezdy-board.service' 'odjezdy-board-run' 'odjezdy-wifi')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+# optional native helper that draws on several outputs (app/native/odjezdy-kms.c, libdrm dumb buffers)
+build() {
+  local app="${ODJEZDY_APP_DIR:-$startdir/../../../app}"
+  if [ -f "$app/native/odjezdy-kms.c" ]; then
+    gcc -O2 -Wall -o "$srcdir/odjezdy-kms" "$app/native/odjezdy-kms.c" $(pkg-config --cflags --libs libdrm)
+  fi
+}
 
 package() {
   local app="${ODJEZDY_APP_DIR:-$startdir/../../../app}"
@@ -17,4 +26,9 @@ package() {
   cp -r "$app/." "$pkgdir/opt/odjezdy/"
   install -Dm644 odjezdy-board.service "$pkgdir/usr/lib/systemd/system/odjezdy-board.service"
   install -Dm755 odjezdy-board-run "$pkgdir/usr/bin/odjezdy-board-run"
+  rm -rf "$pkgdir/opt/odjezdy/native"
+  if [ -x "$srcdir/odjezdy-kms" ]; then
+    install -Dm755 "$srcdir/odjezdy-kms" "$pkgdir/usr/lib/odjezdy/odjezdy-kms"
+  fi
+  install -Dm755 odjezdy-wifi "$pkgdir/usr/bin/odjezdy-wifi"
 }

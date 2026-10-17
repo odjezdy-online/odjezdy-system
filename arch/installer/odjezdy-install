@@ -1,57 +1,241 @@
 #!/usr/bin/env bash
 # Odjezdy OS installer: puts a regular Arch Linux system with the departure board on a disk.
-# Usage: odjezdy-install [--disk /dev/sdX] [--hostname NAME] [--yes] [--offline]
-#   --yes      do not ask for confirmation (needs --disk); DESTROYS the whole disk
-#   --offline  use only the packages bundled on the medium (not implemented: uses mirrors)
-set -euo pipefail
+#
+#   odjezdy-install                          interactive (asks for the disk and a confirmation)
+#   odjezdy-install --disk /dev/sdX --yes    unattended; DESTROYS the whole disk
+#   odjezdy-install --list-disks --json      the disks one can install to, as one JSON object
+#   odjezdy-install --json --disk D --yes    progress as one JSON object per line on stdout:
+#       {"stage":"partition|format|pacstrap|config|bootloader|done","progress":0..1,"message":"..."}
+#       {"error":"...","stage":"..."}        (and a non-zero exit code)
+#     everything the tools print goes to /var/log/odjezdy-install.log instead
+#
+#   odjezdy-install --options --json         what the image offers: locales, keymaps, time zones
+#
+# Options: --hostname NAME  --root-password PW  --yes  --json  --list-disks  --options
+#          --locale cs_CZ.UTF-8  --keymap cz  --timezone Europe/Prague
+set -Eeuo pipefail
 
-DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""
+DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""; JSON=0; LIST=0; OPTS=0
+LOCALE="cs_CZ.UTF-8"; KEYMAP="cz-qwertz"; TZ_NAME="Europe/Prague"
+LOG=/var/log/odjezdy-install.log
 while [ $# -gt 0 ]; do
   case "$1" in
     --disk) DISK="$2"; shift 2 ;;
     --hostname) HOST="$2"; shift 2 ;;
     --root-password) ROOTPW="$2"; shift 2 ;;
     --yes) YES=1; shift ;;
-    -h|--help) sed -n 2,6p "$0"; exit 0 ;;
+    --json) JSON=1; shift ;;
+    --list-disks) LIST=1; shift ;;
+    --options) OPTS=1; shift ;;
+    --locale) LOCALE="$2"; shift 2 ;;
+    --keymap) KEYMAP="$2"; shift 2 ;;
+    --timezone) TZ_NAME="$2"; shift 2 ;;
+    -h|--help) sed -n 2,17p "$0"; exit 0 ;;
     *) echo "Neznámý parametr: $1" >&2; exit 2 ;;
   esac
 done
+
+# --- helpers -------------------------------------------------------------
+
+jstr() {   # JSON string literal
+  local s=$1
+  s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\r'/}; s=${s//$'\t'/\\t}
+  printf '"%s"' "$s"
+}
+
+# the disk that carries the running live medium, if any (e.g. sdb)
+live_disk() {
+  local src
+  src=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null || true)
+  [ -n "$src" ] || return 0
+  lsblk -no PKNAME "$src" 2>/dev/null | head -n1
+}
+
+list_disks() {
+  local live first=1 line mode=bios
+  [ -d /sys/firmware/efi ] && mode=uefi
+  live=$(live_disk)
+  printf '{"disks":['
+  while IFS= read -r line; do
+    local NAME="" SIZE="" MODEL="" RM="" TYPE=""
+    eval "$line"   # lsblk -P gives NAME="..." SIZE="..." MODEL="..." RM="..." TYPE="..."
+    [ "$TYPE" = disk ] || continue
+    case "$NAME" in zram*|loop*|ram*) continue ;; esac
+    local fstypes haspart=false os=false is_live=false rmj=false
+    fstypes=$(lsblk -nro FSTYPE "/dev/$NAME" 2>/dev/null | tail -n +2 | grep . || true)
+    [ -n "$fstypes" ] && haspart=true
+    grep -qiE '^(ntfs|ext[234]|btrfs|xfs|f2fs|bitlocker|apfs|hfsplus)$' <<<"$fstypes" && os=true
+    [ "$NAME" = "$live" ] && is_live=true
+    [ "$RM" = 1 ] && rmj=true
+    MODEL=${MODEL%"${MODEL##*[![:space:]]}"}   # trim trailing blanks
+    [ "$first" = 1 ] || printf ','
+    first=0
+    printf '{"name":%s,"size_bytes":%s,"model":%s,"removable":%s,"has_partitions":%s,"has_os":%s,"is_live_medium":%s,"mode":%s}' \
+      "$(jstr "/dev/$NAME")" "${SIZE:-0}" "$(jstr "$MODEL")" "$rmj" "$haspart" "$os" "$is_live" "$(jstr "$mode")"
+  done < <(lsblk -dbP -o NAME,SIZE,MODEL,RM,TYPE 2>/dev/null)
+  printf ']}\n'
+}
+
+if [ "$LIST" -eq 1 ]; then
+  if [ "$JSON" -eq 1 ]; then list_disks; else
+    lsblk -dpno NAME,SIZE,MODEL,TYPE | awk '$NF=="disk"'
+  fi
+  exit 0
+fi
+
+# --- what the image offers (for the installer UI) --------------------------
+
+# curated display names; anything else the image has is not offered
+LOCALE_NAMES='cs_CZ.UTF-8|Čeština
+sk_SK.UTF-8|Slovenčina
+en_US.UTF-8|English (US)
+en_GB.UTF-8|English (UK)
+de_DE.UTF-8|Deutsch
+pl_PL.UTF-8|Polski
+hu_HU.UTF-8|Magyar
+fr_FR.UTF-8|Français
+es_ES.UTF-8|Español
+it_IT.UTF-8|Italiano
+nl_NL.UTF-8|Nederlands
+pt_PT.UTF-8|Português
+sv_SE.UTF-8|Svenska
+da_DK.UTF-8|Dansk
+nb_NO.UTF-8|Norsk bokmål
+fi_FI.UTF-8|Suomi
+uk_UA.UTF-8|Українська
+ru_RU.UTF-8|Русский
+sl_SI.UTF-8|Slovenščina
+hr_HR.UTF-8|Hrvatski
+ro_RO.UTF-8|Română
+bg_BG.UTF-8|Български
+el_GR.UTF-8|Ελληνικά
+tr_TR.UTF-8|Türkçe'
+
+KEYMAP_NAMES='cz-qwertz|Česká (QWERTZ)
+cz|Česká (QWERTY)
+sk-qwertz|Slovenská (QWERTZ)
+sk-qwerty|Slovenská (QWERTY)
+us|Americká (US)
+uk|Britská (UK)
+de-latin1|Německá
+pl|Polská
+hu|Maďarská
+fr|Francouzská
+es|Španělská
+it|Italská
+sl|Slovinská
+hr|Chorvatská'
+
+keymap_exists() { find /usr/share/kbd/keymaps -name "$1.map*" 2>/dev/null | grep -q .; }
+locale_exists() { grep -qE "^#?${1//./\\.} UTF-8" /etc/locale.gen 2>/dev/null; }
+
+list_options() {
+  local first=1 id name
+  printf '{"locales":['
+  while IFS='|' read -r id name; do
+    locale_exists "$id" || continue
+    [ "$first" = 1 ] || printf ','; first=0
+    printf '{"id":%s,"name":%s}' "$(jstr "$id")" "$(jstr "$name")"
+  done <<<"$LOCALE_NAMES"
+  printf '],"keymaps":['
+  first=1
+  while IFS='|' read -r id name; do
+    keymap_exists "$id" || continue
+    [ "$first" = 1 ] || printf ','; first=0
+    printf '{"id":%s,"name":%s}' "$(jstr "$id")" "$(jstr "$name")"
+  done <<<"$KEYMAP_NAMES"
+  printf '],"timezones":['
+  first=1
+  { echo Europe/Prague; timedatectl list-timezones 2>/dev/null | grep -vx Europe/Prague | grep '^Europe/'
+    timedatectl list-timezones 2>/dev/null | grep -v '^Europe/'; } | while IFS= read -r id; do
+    [ "$first" = 1 ] || printf ','; first=0
+    jstr "$id"
+  done
+  printf ']}\n'
+}
+
+if [ "$OPTS" -eq 1 ]; then list_options; exit 0; fi
+
 [ "$(id -u)" -eq 0 ] || { echo "Spusť jako root." >&2; exit 1; }
 
-say() { printf '\n== %s\n' "$*"; }
+# JSON mode: fd 3 is the progress channel, everything else goes to the log
+if [ "$JSON" -eq 1 ]; then
+  exec 3>&1
+  : > "$LOG"
+  exec >>"$LOG" 2>&1
+fi
+
+STAGE=partition
+emit() {   # emit STAGE PROGRESS MESSAGE
+  STAGE=$1
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"stage":%s,"progress":%s,"message":%s}\n' "$(jstr "$1")" "$2" "$(jstr "$3")" >&3
+  else
+    printf '\n== %s\n' "$3"
+  fi
+}
+fail() {
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"error":%s,"stage":%s}\n' "$(jstr "$1")" "$(jstr "$STAGE")" >&3
+  else
+    echo "CHYBA: $1" >&2
+  fi
+  exit 1
+}
+on_err() { local code=$?; trap - ERR; fail "Příkaz selhal (kód $code) na řádku $1. Podrobnosti: $LOG"; }
+trap 'on_err $LINENO' ERR
+
+# --- choosing and checking the disk ---------------------------------------
 
 if [ -z "$DISK" ]; then
+  [ "$JSON" -eq 0 ] || fail "V režimu --json je potřeba --disk."
   echo "Dostupné disky:"
   lsblk -dpno NAME,SIZE,MODEL,TYPE | awk '$NF=="disk"'
   read -r -p "Na který disk instalovat (např. /dev/sda)? " DISK
 fi
-[ -b "$DISK" ] || { echo "$DISK není blokové zařízení." >&2; exit 1; }
+[ -b "$DISK" ] || fail "$DISK není blokové zařízení."
+[ "$(lsblk -dno TYPE "$DISK")" = disk ] || fail "$DISK není celý disk."
+if [ "$(basename "$DISK")" = "$(live_disk)" ]; then
+  fail "$DISK je médium, ze kterého běží živý systém."
+fi
 if [ "$YES" -ne 1 ]; then
+  [ "$JSON" -eq 0 ] || fail "V režimu --json je potřeba --yes (potvrzení řeší rozhraní)."
   echo "VAROVÁNÍ: celý disk $DISK bude smazán."
   read -r -p "Pro potvrzení napiš celou cestu disku: " ans
   [ "$ans" = "$DISK" ] || { echo "Zrušeno."; exit 1; }
 fi
 
+[[ "$HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || fail "Neplatný název počítače: $HOST"
+locale_exists "$LOCALE" || fail "Jazyk $LOCALE není v obrazu k dispozici."
+keymap_exists "$KEYMAP" || fail "Rozložení klávesnice $KEYMAP není v obrazu k dispozici."
+[ -f "/usr/share/zoneinfo/$TZ_NAME" ] || fail "Časové pásmo $TZ_NAME neexistuje."
+
 if [ -d /sys/firmware/efi ]; then MODE=uefi; else MODE=bios; fi
 case "$DISK" in *nvme*|*mmcblk*|*loop*) P="p" ;; *) P="" ;; esac
 
-say "Dělím disk ($MODE)"
+# --- partitioning and formatting -----------------------------------------
+
+emit partition 0.02 "Dělím disk ($MODE)"
 umount -R /mnt 2>/dev/null || true
 wipefs -af "$DISK" >/dev/null
 if [ "$MODE" = uefi ]; then
   parted -s "$DISK" mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on mkpart root ext4 513MiB 100%
   ESP="${DISK}${P}1"; ROOT="${DISK}${P}2"
-  mkfs.fat -F32 "$ESP" >/dev/null
 else
   parted -s "$DISK" mklabel gpt mkpart bios 1MiB 2MiB set 1 bios_grub on mkpart root ext4 2MiB 100%
   ROOT="${DISK}${P}2"
 fi
 partprobe "$DISK" 2>/dev/null || true; udevadm settle
+
+emit format 0.06 "Formátuji oddíly"
+if [ "$MODE" = uefi ]; then mkfs.fat -F32 "$ESP" >/dev/null; fi
 mkfs.ext4 -qF "$ROOT"
 mount "$ROOT" /mnt
 if [ "$MODE" = uefi ]; then mkdir -p /mnt/boot; mount "$ESP" /mnt/boot; fi
 
-say "Instaluji systém (potřebuje internet)"
+# --- packages -------------------------------------------------------------
+
+emit pacstrap 0.10 "Stahuji a instaluji systém (potřebuje internet)"
 cat > /tmp/pacman-install.conf <<'C'
 [options]
 HoldPkg = pacman glibc
@@ -69,27 +253,62 @@ Server = file:///srv/odjezdy-repo
 C
 pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
   linux-firmware-radeon linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek \
-  linux-firmware-broadcom intel-ucode amd-ucode iwd nodejs odjezdy-board grub efibootmgr sudo nano
+  linux-firmware-broadcom intel-ucode amd-ucode kbd iwd nodejs odjezdy-board grub efibootmgr sudo nano 2>&1 \
+  | {
+      # pacman prints no (n/m) counters when it is not on a terminal: the total comes from its
+      # "Packages (N) ..." line, then every "<pkg> downloading..." and "installing <pkg>..." is one step
+      total=0; dl=0; inst=0; phase=resolve
+      while IFS= read -r line; do
+        printf '%s\n' "$line"
+        if [[ $line =~ ^Packages\ \(([0-9]+)\) ]]; then total=${BASH_REMATCH[1]}
+        elif [[ $line == *"Retrieving packages"* ]]; then phase=download
+        elif [[ $line == "installing "* ]]; then
+          phase=install; inst=$((inst + 1))
+          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$inst" -v m="$total" 'BEGIN{printf "%.2f", 0.45 + 0.35*n/m}')" "Instaluji balíček $inst z $total"
+        elif [ "$phase" = download ] && [[ $line == *" downloading..." ]]; then
+          dl=$((dl + 1))
+          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$dl" -v m="$total" 'BEGIN{printf "%.2f", 0.10 + 0.35*(n>m?m:n)/m}')" "Stahuji balíček $dl z $total"
+        fi
+      done
+    }
 genfstab -U /mnt >> /mnt/etc/fstab
 
-say "Nastavuji"
+# --- configuration --------------------------------------------------------
+
+emit config 0.82 "Nastavuji systém"
 echo "$HOST" > /mnt/etc/hostname
-ln -sf /usr/share/zoneinfo/Europe/Prague /mnt/etc/localtime
-echo "LANG=cs_CZ.UTF-8" > /mnt/etc/locale.conf
-sed -i 's/^#\(cs_CZ.UTF-8\)/\1/; s/^#\(en_US.UTF-8\)/\1/' /mnt/etc/locale.gen
+ln -sf "/usr/share/zoneinfo/$TZ_NAME" /mnt/etc/localtime
+echo "LANG=$LOCALE" > /mnt/etc/locale.conf
+printf 'KEYMAP=%s\nFONT=eurlatgr\n' "$KEYMAP" > /mnt/etc/vconsole.conf
+sed -i "s/^#\(${LOCALE//./\\.} UTF-8\)/\1/; s/^#\(en_US\.UTF-8 UTF-8\)/\1/" /mnt/etc/locale.gen
 install -Dm644 /etc/systemd/network/20-ethernet.network /mnt/etc/systemd/network/20-ethernet.network
 arch-chroot /mnt locale-gen >/dev/null
 arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-timesyncd iwd odjezdy-board >/dev/null
 ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
+
+# what the user set up in the live session (stop, theme, Wi-Fi) goes with the system
+# (everything under /etc/odjezdy: config.json, display-N.json for extra screens, themes/)
+if [ -d /etc/odjezdy ]; then
+  mkdir -p /mnt/etc/odjezdy
+  cp -a /etc/odjezdy/. /mnt/etc/odjezdy/
+fi
+for f in /var/lib/iwd/*.psk /var/lib/iwd/*.open /var/lib/iwd/*.8021x; do
+  [ -f "$f" ] || continue
+  install -dm700 /mnt/var/lib/iwd
+  install -m600 "$f" /mnt/var/lib/iwd/
+done
+
 # service console on tty2: normal login
-if [ -z "$ROOTPW" ] && [ "$YES" -ne 1 ]; then
+if [ -n "$ROOTPW" ]; then
+  echo "root:$ROOTPW" | arch-chroot /mnt chpasswd
+elif [ "$YES" -ne 1 ] && [ "$JSON" -eq 0 ]; then
   echo "Nastav heslo uživatele root (konzole na Alt+F2):"
   arch-chroot /mnt passwd root
-elif [ -n "$ROOTPW" ]; then
-  echo "root:$ROOTPW" | arch-chroot /mnt chpasswd
 fi
 
-say "Instaluji zavaděč"
+# --- boot loader ----------------------------------------------------------
+
+emit bootloader 0.90 "Instaluji zavaděč"
 if [ "$MODE" = uefi ]; then
   arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=OdjezdyOS --removable
 else
@@ -100,4 +319,8 @@ arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 
 sync
 umount -R /mnt
-say "Hotovo. Vyjmi médium a restartuj (příkaz: reboot)."
+if [ "$JSON" -eq 1 ]; then
+  emit "done" 1 "Hotovo. Vyjměte médium a restartujte."
+else
+  emit "done" 1 "Hotovo. Vyjmi médium a restartuj (příkaz: reboot)."
+fi

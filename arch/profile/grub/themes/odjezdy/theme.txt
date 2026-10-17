@@ -1,0 +1,43 @@
+# Odjezdy OS boot menu: black panel, amber LED look (same colours as the board)
+desktop-image: "background.png"
+desktop-color: "#0a0a0a"
+title-text: ""
+terminal-font: "Unifont Regular 16"
+terminal-box: "terminal_*.png"
+
++ boot_menu {
+  left = 28%
+  top = 46%
+  width = 44%
+  height = 34%
+  item_font = "Unifont Regular 16"
+  selected_item_font = "Unifont Regular 16"
+  item_color = "#ffb000"
+  selected_item_color = "#0a0a0a"
+  item_height = 36
+  item_padding = 10
+  item_spacing = 8
+  selected_item_pixmap_style = "select_*.png"
+  scrollbar = false
+}
+
++ label {
+  id = "__timeout__"
+  left = 28%
+  top = 86%
+  width = 44%
+  align = "center"
+  color = "#7a5400"
+  font = "Unifont Regular 16"
+  text = "Automatický start za %d s"
+}
+
++ label {
+  left = 28%
+  top = 92%
+  width = 44%
+  align = "center"
+  color = "#7a5400"
+  font = "Unifont Regular 16"
+  text = "↑ ↓ výběr    Enter spustit    e upravit"
+}
