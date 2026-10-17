@@ -1,0 +1,113 @@
+// Multiple monitors. One board process per display: the primary one (keyboard, mouse, menus, updates) runs
+// display 0 and starts a child board for every other display, each with its own config file
+// (/etc/odjezdy/display-N.json: stop, theme, …).
+//
+// How the pixels get out:
+//  - 'fb'  : every display has its own framebuffer (/dev/fb0, /dev/fb1 …: several GPUs, some VMs)
+//  - 'kms' : one GPU with several connected outputs. The kernel's fbdev emulation only shows one of them,
+//            so native/odjezdy-kms (DRM/KMS helper) drives all outputs and boards stream frames to it over
+//            a unix socket ("OUT n" -> "OK w h stride", then raw XRGB8888 frames).
+//  - 'single': the usual /dev/fb0.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const net = require('net');
+const { spawn } = require('child_process');
+
+const SOCK = process.env.ODJEZDY_KMS_SOCK || '/run/odjezdy-kms.sock';
+const KMS_BIN = () => [process.env.ODJEZDY_KMS, '/usr/lib/odjezdy/odjezdy-kms', path.join(__dirname, 'native', 'odjezdy-kms')]
+  .find((p) => { try { return p && (fs.accessSync(p, fs.constants.X_OK), true); } catch { return false; } }) || null;
+const displayConfig = (n) => path.join(path.dirname(process.env.ODJEZDY_CONFIG || '/etc/odjezdy/config.json'), `display-${n}.json`);
+
+function connectedConnectors() {
+  try {
+    return fs.readdirSync('/sys/class/drm').filter((d) => /^card\d+-/.test(d))
+      .filter((d) => { try { return fs.readFileSync(`/sys/class/drm/${d}/status`, 'utf8').trim() === 'connected'; } catch { return false; } })
+      .map((d) => d.replace(/^card\d+-/, ''));
+  } catch { return []; }
+}
+function framebuffers() {
+  try { return fs.readdirSync('/dev').filter((d) => /^fb\d+$/.test(d)).sort((a, b) => a.slice(2) - b.slice(2)); } catch { return []; }
+}
+
+// what this machine has; ODJEZDY_DISPLAYS=off forces a single display
+function detect() {
+  if (process.env.ODJEZDY_DISPLAYS === 'off') return { mode: 'single' };
+  if (process.env.ODJEZDY_DISPLAYS === 'kms' && KMS_BIN()) return { mode: 'kms', connectors: connectedConnectors() }; // force (testing)
+  const conns = connectedConnectors(), fbs = framebuffers();
+  if (fbs.length > 1) return { mode: 'fb', outputs: fbs.map((f) => ({ type: 'fb', dev: f, name: f })) };
+  if (conns.length > 1 && KMS_BIN()) return { mode: 'kms', connectors: conns };
+  return { mode: 'single', connectors: conns };
+}
+
+// start the helper, resolve with its output list [{ n, w, h, stride, name }]
+function startKms() {
+  return new Promise((resolve, reject) => {
+    const p = spawn(KMS_BIN(), [SOCK, process.env.ODJEZDY_VT || 'tty1'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = '';
+    const timer = setTimeout(() => reject(new Error('odjezdy-kms did not start')), 8000);
+    p.on('exit', (c) => reject(new Error('odjezdy-kms exited ' + c)));
+    p.stdout.on('data', (d) => {
+      out += d;
+      if (!/READY \d+/.test(out)) return;
+      clearTimeout(timer);
+      kmsList().then((list) => resolve({ proc: p, outputs: list })).catch(reject);
+    });
+  });
+}
+function kmsList() {
+  return new Promise((resolve, reject) => {
+    const s = net.createConnection(SOCK, () => s.write('LIST\n'));
+    let buf = '';
+    s.on('data', (d) => {
+      buf += d;
+      if (!/END\n/.test(buf)) return;
+      s.end();
+      resolve(buf.split('\n').filter((l) => l.startsWith('OUT ')).map((l) => {
+        const [, n, w, h, stride, name] = l.split(' ');
+        return { type: 'kms', n: +n, w: +w, h: +h, stride: +stride, name };
+      }));
+    });
+    s.on('error', reject);
+  });
+}
+// connect a board to output n: { type:'kms', n, w, h, stride, sock }
+function kmsConnect(n) {
+  return new Promise((resolve, reject) => {
+    const s = net.createConnection(SOCK, () => s.write(`OUT ${n}\n`));
+    let buf = '';
+    const onData = (d) => {
+      buf += d;
+      const i = buf.indexOf('\n');
+      if (i < 0) return;
+      s.off('data', onData);
+      const [ok, w, h, stride] = buf.slice(0, i).split(' ');
+      if (ok !== 'OK') return reject(new Error(buf.slice(0, i)));
+      resolve({ type: 'kms', n, w: +w, h: +h, stride: +stride, sock: s });
+    };
+    s.on('data', onData);
+    s.on('error', reject);
+  });
+}
+
+// primary: keep one child board per extra display running
+const children = new Map(); // n -> ChildProcess
+function startChildren(outputs, boardJs, log) {
+  for (const o of outputs) {
+    if (o.index === 0) continue;
+    const run = () => {
+      const args = [boardJs, '--display', String(o.index), '--output', o.type === 'kms' ? `kms:${o.n}` : o.dev];
+      const env = { ...process.env, ODJEZDY_CONFIG: displayConfig(o.index), ODJEZDY_CHILD: '1' };
+      const c = spawn(process.execPath, args, { env, stdio: 'ignore' });
+      children.set(o.index, c);
+      log(`display ${o.index} (${o.name}): board pid ${c.pid}`);
+      c.on('exit', (code) => { if (children.get(o.index) === c && !stopping) { log(`display ${o.index} exited ${code}, restarting`); setTimeout(run, 3000); } });
+    };
+    run();
+  }
+}
+let stopping = false;
+function stopChildren() { stopping = true; for (const c of children.values()) try { c.kill('SIGTERM'); } catch {} }
+function reloadChild(n) { try { children.get(n)?.kill('SIGHUP'); } catch {} }
+
+module.exports = { detect, startKms, kmsConnect, startChildren, stopChildren, reloadChild, displayConfig, framebuffers };

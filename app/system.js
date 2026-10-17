@@ -47,7 +47,7 @@ const cmdline = () => { try { return fs.readFileSync('/proc/cmdline', 'utf8'); }
 // fallback when the installer does not answer --options (older image)
 const DEFAULT_OPTIONS = {
   locales: [['cs_CZ.UTF-8', 'Čeština'], ['sk_SK.UTF-8', 'Slovenčina'], ['en_US.UTF-8', 'English (US)'], ['en_GB.UTF-8', 'English (UK)'], ['de_DE.UTF-8', 'Deutsch'], ['pl_PL.UTF-8', 'Polski']].map(([id, name]) => ({ id, name })),
-  keymaps: [['cz', 'Česká (QWERTZ)'], ['cz-qwerty', 'Česká (QWERTY)'], ['sk-qwertz', 'Slovenská (QWERTZ)'], ['us', 'Anglická (US)'], ['uk', 'Anglická (UK)'], ['de', 'Německá'], ['pl', 'Polská']].map(([id, name]) => ({ id, name })),
+  keymaps: [['cz', 'Česká'], ['cz-qwertz', 'Česká (QWERTZ)'], ['sk-qwertz', 'Slovenská (QWERTZ)'], ['us', 'Anglická (US)'], ['uk', 'Anglická (UK)'], ['de', 'Německá'], ['pl', 'Polská']].map(([id, name]) => ({ id, name })),
   timezones: ['Europe/Prague', 'Europe/Bratislava', 'Europe/Vienna', 'Europe/Berlin', 'Europe/Warsaw', 'Europe/Budapest', 'Europe/Zurich', 'Europe/Amsterdam', 'Europe/Paris', 'Europe/London', 'Europe/Madrid', 'Europe/Rome', 'Europe/Copenhagen', 'Europe/Stockholm', 'Europe/Helsinki', 'Europe/Kyiv', 'UTC'],
 };
 

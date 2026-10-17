@@ -49,7 +49,9 @@ function ppmToPng(ppm, png) {
 
 const KEYMAP = {
   '|': 'shift-backslash', "'": 'apostrophe', '"': 'shift-apostrophe', $: 'shift-4', '(': 'shift-9', ')': 'shift-0', _: 'shift-minus',
-  '>': 'shift-dot', '<': 'shift-comma', '*': 'shift-8', ':': 'shift-semicolon', '&': 'shift-7', '\\': 'backslash', ' ': 'spc', '.': 'dot', ',': 'comma', '-': 'minus', '/': 'slash', '=': 'equal', ';': 'semicolon', '\n': 'ret' };
+  '>': 'shift-dot', '<': 'shift-comma', '*': 'shift-8', ':': 'shift-semicolon', '&': 'shift-7', '\\': 'backslash', ' ': 'spc', '.': 'dot', ',': 'comma', '-': 'minus', '/': 'slash', '=': 'equal', ';': 'semicolon', '\n': 'ret',
+  '{': 'shift-bracket_left', '}': 'shift-bracket_right', '[': 'bracket_left', ']': 'bracket_right', '+': 'shift-equal', '!': 'shift-1',
+  '#': 'shift-3', '@': 'shift-2', '%': 'shift-5', '^': 'shift-6', '~': 'shift-grave_accent', '?': 'shift-slash', '`': 'grave_accent' };
 
 (async () => {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -73,6 +75,13 @@ const KEYMAP = {
     }
     await monitor(cmds);
     console.log(`sent ${cmds.length} keys`);
+  } else if (cmd === 'shothead') {
+    // node vmctl.js shothead <device-id> <head> out.png — one output of a multi-head GPU (QMP, PNG directly)
+    const [dev, head, file] = rest;
+    const png = path.resolve(file || `head${head}.png`);
+    console.log(await qmp([{ execute: 'qmp_capabilities' }, { execute: 'screendump', arguments: { filename: png, device: dev, head: Number(head), format: 'png' } }]));
+    await new Promise((r) => setTimeout(r, 500));
+    console.log(png);
   } else if (cmd === 'pointer') {
     // node vmctl.js pointer <x 0..1> <y 0..1> [click]  — absolute tablet event via QMP
     // (HMP mouse_move does not reach the guest with -display none). Needs -qmp tcp:127.0.0.1:4445,server,nowait
