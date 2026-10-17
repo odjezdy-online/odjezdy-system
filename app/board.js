@@ -680,7 +680,7 @@ async function refreshBoard() {
     return;
   }
   state.fallback = null;
-  const now = Date.now(), seen = new Set(), all = [];
+  const now = Date.now(), seen = new Map(), all = [];
   for (const d of rows) {
     if (!d.expectedTime) d.expectedTime = d.plannedTime;
     if (depTime(d) < now - 60000) continue;
@@ -689,9 +689,17 @@ async function refreshBoard() {
     if (d.trainNumber && !d.train) d.train = `${d.category || d.line || ''} ${d.trainNumber}`.trim();
     if (d.destinationConfident === false) d.destination = ''; // "Neznámá stanice" placeholder: better blank
     d.via = Array.isArray(d.viaStops) ? d.viaStops : [];
-    const k = `${d.line}|${d.destination}|${d.plannedTime}`;
-    if (seen.has(k)) continue;
-    seen.add(k); all.push(d);
+    // the same train often comes from several sources at a station (ČD + DÚK + PID): one row per train
+    // number and minute, keeping the copy that knows more (destination, platform, delay)
+    const minute = Math.floor(new Date(d.plannedTime).getTime() / 60000);
+    const k = d.trainNumber ? `T|${String(d.trainNumber).replace(/\D/g, '')}|${minute}` : `${d.line}|${d.destination}|${minute}`;
+    const prev = seen.get(k);
+    if (prev) {
+      const score = (x) => (x.destination ? 4 : 0) + (x.platform ? 2 : 0) + (Number.isFinite(x.delayMinutes) ? 1 : 0);
+      if (score(d) > score(prev)) all[all.indexOf(prev)] = d, seen.set(k, d);
+      continue;
+    }
+    seen.set(k, d); all.push(d);
   }
   all.sort((a, b) => depTime(a) - depTime(b));
   state.deps = all;
