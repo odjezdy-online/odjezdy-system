@@ -514,6 +514,33 @@ const MOTIS_TYPE = {
 };
 const isTransitous = () => state.cfg.stop?.source === 'transitous';
 
+// Offline mode: the last good board is kept on disk, so after a reboot without network (or an API outage)
+// the board still shows the timetable it last knew; past departures drop off on their own (upcoming()).
+const CACHE_FILE = process.env.ODJEZDY_CACHE || (PNG_OUT ? null : '/var/lib/odjezdy/board-cache.json');
+const CACHE_MAX_AGE = 12 * 3600 * 1000;
+const cacheKey = () => `${state.cfg.stop.source || 'odjezdy'}:${(state.cfg.stop.ids || []).join(',')}`;
+let cacheSavedAt = 0;
+function saveCache() {
+  if (!CACHE_FILE || Date.now() - cacheSavedAt < 120000) return; // at most every 2 min (SD cards)
+  cacheSavedAt = Date.now();
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    const tmp = CACHE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ key: cacheKey(), lastOk: state.lastOk, deps: state.deps.slice(0, 80), alerts: state.alerts }));
+    fs.renameSync(tmp, CACHE_FILE);
+  } catch (e) { log('cache save: ' + e.message); }
+}
+function loadCache() {
+  if (!CACHE_FILE) return false;
+  try {
+    const c = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (c.key !== cacheKey() || !(Date.now() - c.lastOk < CACHE_MAX_AGE)) return false;
+    state.deps = c.deps || []; state.alerts = c.alerts || []; state.lastOk = c.lastOk; state.fromCache = true;
+    log(`offline cache: ${state.deps.length} departures from ${new Date(c.lastOk).toISOString()}`);
+    return true;
+  } catch { return false; }
+}
+
 async function refreshTransitous() {
   const id = state.cfg.stop.ids[0];
   const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60`);
@@ -541,6 +568,8 @@ async function refreshTransitous() {
   state.lineAlerts = byLine;
   state.lastOk = now;
   state.error = null;
+  state.fromCache = false;
+  saveCache();
 }
 
 async function refreshBoard() {
@@ -566,6 +595,8 @@ async function refreshBoard() {
   state.deps = all;
   state.lastOk = now;
   state.error = null;
+  state.fromCache = false;
+  saveCache();
 }
 async function refreshAlerts() {
   if (isTransitous()) return; // alerts arrive together with the stop times
@@ -695,6 +726,8 @@ const platformOf = (d) => {
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
   const src = isTransitous() ? 'data Transitous · transitous.org/sources' : 'data odjezdy.online';
+  // offline with older data: say clearly how old the shown timetable is
+  if ((state.error || state.fromCache) && state.lastOk) return `BEZ SPOJENÍ · poslední data ${hhmm(new Date(state.lastOk))}${state.error ? ' (' + state.error + ')' : ''} · ${src}`;
   if (state.error) return `bez spojení (${state.error}) · ${src}`;
   return state.lastOk ? `aktualizováno ${hhmm(new Date(state.lastOk))} · ${src}` : state.net;
 }
@@ -824,7 +857,7 @@ function chooseStop(stop) {
   state.cfg.favorites = [pickStop(stop), ...(state.cfg.favorites || []).filter((f) => f.ids?.[0] !== stop.ids[0])].slice(0, 9);
   saveConfig(state.cfg);
   state.mode = 'board';
-  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; kick(); }
+  if (changed) { state.deps = []; state.lastOk = 0; state.alerts = []; state.fromCache = false; loadCache(); kick(); }
 }
 
 function startVisible(m) {
@@ -1345,7 +1378,8 @@ async function main() {
   state.ip = localIp();
 
   if (PNG_OUT) {
-    try { await refreshBoard(); await refreshAlerts(); } catch (e) { state.error = e.message; }
+    loadCache();
+    try { await refreshBoard(); await refreshAlerts(); } catch (e) { state.error = e.cause?.code || e.message; }
     t0 = Date.now() - 10000;
     if (args.includes('--setup')) { state.mode = 'setup'; state.query = 'hlavni nadr'; state.results = searchStops(state.query, setupMaxResults(m)); }
     if (args.includes('--browse')) { // e.g. --browse "ustecky/usti" walks the region picker for a screenshot
@@ -1381,6 +1415,7 @@ async function main() {
   if (!state.cfg.forced && !fs.existsSync(marker) && !args.includes('--no-menu')) openStart(true);
   try { fs.writeFileSync(marker, ''); } catch {}
 
+  loadCache();
   kick();
   const alertsLoop = async () => { try { await refreshAlerts(); } catch (e) { log('alerts: ' + e.message); } setTimeout(alertsLoop, 120000); };
   setTimeout(alertsLoop, 3000);
