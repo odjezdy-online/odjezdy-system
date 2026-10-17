@@ -44,8 +44,20 @@ function isLive() {
 }
 const cmdline = () => { try { return fs.readFileSync('/proc/cmdline', 'utf8'); } catch { return ''; } };
 
+// fallback when the installer does not answer --options (older image)
+const DEFAULT_OPTIONS = {
+  locales: [['cs_CZ.UTF-8', 'Čeština'], ['sk_SK.UTF-8', 'Slovenčina'], ['en_US.UTF-8', 'English (US)'], ['en_GB.UTF-8', 'English (UK)'], ['de_DE.UTF-8', 'Deutsch'], ['pl_PL.UTF-8', 'Polski']].map(([id, name]) => ({ id, name })),
+  keymaps: [['cz', 'Česká (QWERTZ)'], ['cz-qwerty', 'Česká (QWERTY)'], ['sk-qwertz', 'Slovenská (QWERTZ)'], ['us', 'Anglická (US)'], ['uk', 'Anglická (UK)'], ['de', 'Německá'], ['pl', 'Polská']].map(([id, name]) => ({ id, name })),
+  timezones: ['Europe/Prague', 'Europe/Bratislava', 'Europe/Vienna', 'Europe/Berlin', 'Europe/Warsaw', 'Europe/Budapest', 'Europe/Zurich', 'Europe/Amsterdam', 'Europe/Paris', 'Europe/London', 'Europe/Madrid', 'Europe/Rome', 'Europe/Copenhagen', 'Europe/Stockholm', 'Europe/Helsinki', 'Europe/Kyiv', 'UTC'],
+};
+
 const installer = {
   available: () => !!INSTALL(),
+  defaultOptions: () => JSON.parse(JSON.stringify(DEFAULT_OPTIONS)),
+  // {locales, keymaps, timezones} from the image itself; null when the installer predates --options
+  async options() {
+    try { const o = await json(INSTALL(), ['--options', '--json'], 15000); return o.locales?.length ? o : null; } catch { return null; }
+  },
   async disks() { return (await json(INSTALL(), ['--list-disks', '--json'])).disks || []; },
   // onEvent({stage, progress, message}) for every line; resolves on "done", rejects on {"error"} / exit code
   run(disk, onEvent, extra = []) {
@@ -79,8 +91,14 @@ const wifi = {
   status: () => json(WIFI(), ['status', '--json'], 15000),
 };
 
+// console keyboard layout, applied immediately (the board reads raw tty input through it)
+function setKeymap(id) {
+  if (!/^[\w-]+$/.test(id)) return;
+  execFile('loadkeys', [id], (e) => { if (e) execFile('loadkeys', ['-q', id], () => {}); });
+}
+
 function reboot() {
   execFile('systemctl', ['reboot'], (e) => { if (e) execFile('reboot', () => {}); });
 }
 
-module.exports = { isLive, cmdline, installer, wifi, reboot };
+module.exports = { isLive, cmdline, installer, wifi, setKeymap, reboot };
