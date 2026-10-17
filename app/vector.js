@@ -173,15 +173,22 @@ class Canvas {
       const d = Math.hypot(x - c0, y - c0) - rad;
       mask[y * pitch + x] = d <= -0.5 ? 1 : d >= 0.5 ? 0 : 0.5 - d;
     }
+    // hot loop (every frame of the UK theme): no allocations, writes straight into rgb over the bg
     for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
       const i = (cy * cols + cx) * 3;
       // lit dots take the cell colour (boosted so a half-covered cell still glows), dark ones the "off" tint
       const lum = Math.max(avg[i] - bg[0], avg[i + 1] - bg[1], avg[i + 2] - bg[2]) / 255;
-      const k = Math.min(1, lum * 1.6);
-      const col = [0, 1, 2].map((c) => off[c] + (Math.min(255, avg[i + c] * (k > 0 ? 1 / Math.max(lum, 0.35) : 0)) - off[c]) * k);
-      for (let y = 0; y < pitch; y++) for (let x = 0; x < pitch; x++) {
-        const a = mask[y * pitch + x];
-        if (a) this.blend(cx * pitch + x, cy * pitch + y, col.map(Math.round), Math.round(a * 255));
+      const k = Math.min(1, lum * 1.6), boost = k > 0 ? 1 / Math.max(lum, 0.35) : 0;
+      const r = off[0] + (Math.min(255, avg[i] * boost) - off[0]) * k;
+      const g = off[1] + (Math.min(255, avg[i + 1] * boost) - off[1]) * k;
+      const b = off[2] + (Math.min(255, avg[i + 2] * boost) - off[2]) * k;
+      for (let y = 0; y < pitch; y++) {
+        let o = ((cy * pitch + y) * w + cx * pitch) * 3;
+        for (let x = 0; x < pitch; x++, o += 3) {
+          const a = mask[y * pitch + x];
+          if (!a) continue;
+          rgb[o] = bg[0] + (r - bg[0]) * a + 0.5; rgb[o + 1] = bg[1] + (g - bg[1]) * a + 0.5; rgb[o + 2] = bg[2] + (b - bg[2]) * a + 0.5;
+        }
       }
     }
   }

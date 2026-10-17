@@ -303,6 +303,7 @@ class Screen {
     this.frame = Buffer.alloc(this.stride * this.h);
     this.prev = null;
     this.frames = 0;
+    this.shown = null; this.flushes = 0; // what is on the framebuffer now (flush)
   }
   // paint matrix into the pixel buffer; dark "unlit" dots are drawn very faintly like a real panel
   draw(m) {
@@ -338,7 +339,7 @@ class Screen {
     }
     this.prev = Uint8Array.from(m.buf);
     const under = pointer.visible ? this.drawCursor(put, bytes) : null;
-    if (this.fd !== null && ownVtActive(true)) fs.writeSync(this.fd, frame, 0, frame.length, 0); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
+    if (this.fd !== null && ownVtActive(true)) this.flush(); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
     if (under) { under.data.copy(frame, 0, 0, 0); this.restoreCursor(under, bytes); }
   }
   // native mode: copy an RGB canvas (vector theme) into the framebuffer format
@@ -357,8 +358,28 @@ class Screen {
     this.look = null;
     const put = (o, col) => { frame[o] = col[2]; frame[o + 1] = col[1]; frame[o + 2] = col[0]; if (bytes === 4) frame[o + 3] = 255; };
     const under = pointer.visible ? this.drawCursor(put, bytes) : null;
-    if (this.fd !== null && ownVtActive(true)) fs.writeSync(this.fd, frame, 0, frame.length, 0); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
+    if (this.fd !== null && ownVtActive(true)) this.flush(); // re-check right before writing: after Alt+F2 fbcon has just redrawn tty2
     if (under) this.restoreCursor(under, bytes);
+  }
+  // Write only the rows that differ from what is already on screen: a full 1280x800x4 frame per tick is
+  // ~4 MB, which is slow on emulated VGA (VirtualBox, QEMU TCG). Every ~2 s and after a VT switch the whole
+  // frame goes out anyway, in case console text was printed over the framebuffer.
+  flush() {
+    const { frame, stride } = this;
+    if (!this.shown || ++this.flushes % 30 === 0 || this.flushes < 75) {
+      fs.writeSync(this.fd, frame, 0, frame.length, 0);
+      this.shown = Buffer.from(frame);
+      return;
+    }
+    let y0 = -1;
+    const out = (a, b) => { const o = a * stride, n = (b - a) * stride; fs.writeSync(this.fd, frame, o, n, o); frame.copy(this.shown, o, o, o + n); };
+    for (let y = 0; y < this.h; y++) {
+      const o = y * stride;
+      const same = frame.compare(this.shown, o, o + stride, o, o + stride) === 0;
+      if (!same && y0 < 0) y0 = y;
+      else if (same && y0 >= 0) { out(y0, y); y0 = -1; }
+    }
+    if (y0 >= 0) out(y0, this.h);
   }
   // arrow sprite drawn on top of the frame, the pixels below are restored after the write
   drawCursor(put, bytes) {
@@ -1404,7 +1425,7 @@ function ownVtActive(force = false) {
     vtCheckAt = Date.now();
     let now = vtActive;
     try { now = fs.readFileSync('/sys/class/tty/tty0/active', 'utf8').trim() === OWN_VT; } catch {} // unreadable: keep last state
-    if (now && !vtActive && screen) { screen.prev = null; screen.look = null; lastNative = 0; } // repaint on return
+    if (now && !vtActive && screen) { screen.prev = null; screen.look = null; screen.shown = null; lastNative = 0; } // repaint on return
     vtActive = now;
     if (now && !force) checkFb(); // not from inside Screen.draw: it may replace the screen
   }
@@ -1494,6 +1515,11 @@ async function main() {
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
     if (args.includes('--start')) { openStart(true); state.start.until = Date.now() + 14500; }
     tick();
+    if (process.env.ODJEZDY_BENCH) { // ODJEZDY_BENCH=20: average ms per frame (render + fb conversion)
+      const n = +process.env.ODJEZDY_BENCH, b0 = process.hrtime.bigint();
+      for (let i = 0; i < n; i++) { lastNative = 0; t0 -= 1000; tick(); }
+      console.log(`bench: ${(Number(process.hrtime.bigint() - b0) / 1e6 / n).toFixed(1)} ms/frame`);
+    }
     screen.savePng(PNG_OUT);
     console.log(`wrote ${PNG_OUT} (${screen.w}x${screen.h}, ${m.cols}x${m.rows} LEDs, ${state.deps.length} departures)`);
     return;
