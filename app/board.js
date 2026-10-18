@@ -596,7 +596,9 @@ function loadCache() {
 }
 
 async function refreshTransitous(id = state.cfg.stop.ids[0], radius = 0) {
+  const stopKey = cacheKey();
   const j = await getJson(`${TRANSITOUS}/api/v1/stoptimes?stopId=${encodeURIComponent(id)}&n=60${radius ? '&radius=' + radius : ''}`);
+  if (cacheKey() !== stopKey) return; // stop changed while waiting
   const now = Date.now(), alerts = new Map(), byLine = new Map();
   const text = (a) => (a.headerText || a.descriptionText || '').replace(/\s+/g, ' ').trim();
   state.deps = (j.stopTimes || []).map((x) => {
@@ -678,6 +680,7 @@ async function refreshBoard() {
   if (isTransitous()) return refreshTransitous();
   const ids = state.cfg.stop.ids.slice(0, 8);
   if (!ids.length) return;
+  const stopKey = cacheKey(); // the stop this request is for: a late answer must not overwrite another stop's board
   let rows;
   try { rows = await fetchBoardRows(ids); }
   catch (e) {
@@ -688,6 +691,7 @@ async function refreshBoard() {
     state.fallback = e.name === 'AbortError' ? 'časový limit' : (e.cause?.code || e.message);
     return;
   }
+  if (cacheKey() !== stopKey) return; // stop changed while waiting
   state.fallback = null;
   const now = Date.now(), seen = new Map(), all = [];
   for (const d of rows) {
@@ -888,7 +892,7 @@ const minutesTo = (d) => Math.round((depTime(d) - Date.now()) / 60000);
 const platformOf = (d) => {
   if (!d.platform || /^(N\/A|Neznámé|unknown)$/i.test(d.platform)) return '';
   // rail data says "Nástupiště 3" / "kolej 5"; boards only show the number
-  return String(d.platform).replace(/^(nástupiště|nást\.?|kolej|k\.)\s*/i, '').trim();
+  return String(d.platform).replace(/^(nástupiště|nást\.?|kolej|kol\.?|k\.)\s*/i, '').trim(); // "Kol. 12" -> "12"
 };
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
@@ -1896,14 +1900,18 @@ function onKey(k) {
 }
 
 // ---------------------------------------------------------------- main loop
-let boardTimer = null;
+let boardTimer = null, boardGen = 0;
 function kick() {
   clearTimeout(boardTimer);
+  const gen = ++boardGen; // a stop change starts a new loop; the old one (maybe mid-request) stops itself
   const loop = async () => {
+    if (gen !== boardGen) return;
     try {
       await refreshBoard();
+      if (gen !== boardGen) return;
       state.net = 'online';
     } catch (e) {
+      if (gen !== boardGen) return;
       state.error = e.name === 'AbortError' ? 'časový limit' : (e.cause?.code || e.message);
       log('board: ' + state.error);
     }
