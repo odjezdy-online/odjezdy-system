@@ -21,7 +21,7 @@ function countdownBoard(m, t, api, deps, clockY) {
     m.textRight(mins <= 0 ? 'due' : mins < 60 ? `${mins} min` : api.hhmm(new Date(api.depTime(d))), W - 2, y, 'normal', mins <= 0 ? C.WHITE : C.AMBER);
   });
   const n = deps.map(depNotice).find(Boolean);
-  if (n || state.alerts.length) marquee(m, api, [...state.alerts, n?.text].filter(Boolean).join('   ·   '), 2, W - 2, clockY - nor - 2, 'small', C.DIM, t);
+  if (n || state.alerts.length) marquee(m, api, [...api.alertLines(), n?.text].filter(Boolean).join('   ·   '), 2, W - 2, clockY - nor - 2, 'small', C.DIM, t);
   if (pg.pages > 1) m.textRight(`${pg.page + 1}/${pg.pages}`, W - 2, clockY + 4, 'small', C.DIM);
 }
 

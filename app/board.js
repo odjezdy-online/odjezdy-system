@@ -651,8 +651,19 @@ function validityText(a) {
 function noteAlert(a) {
   const text = cleanText(a.summary || a.title);
   if (!text) return '';
-  (state.alertInfo ||= new Map()).set(text, { details: cleanText(a.details), valid: validityText(a), kind: a.kind || '' });
+  // details from the server; without them, a title the source cut off ("přetrasování ...") is completed from the
+  // full description (the source's own text, e.g. DÚK), so notices are not cut off
+  let details = cleanText(a.details);
+  if (!details && /(\.\.\.|…)$/.test(text) && a.description) details = cleanText(a.description).slice(0, 420);
+  (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '' });
   return text;
+}
+// the notice as one line for marquees: headline and details together (details repeating the headline are not doubled)
+function fullAlertText(text) {
+  const d = state.alertInfo?.get(text)?.details;
+  if (!d) return text;
+  const head = text.replace(/\s*(\.\.\.|…)$/, '').trim(), lower = (x) => x.toLowerCase();
+  return lower(d).startsWith(lower(head).slice(0, 24)) ? d : `${head}: ${d}`;
 }
 async function fetchBoardRows(ids) {
   if (await hasApiV2()) {
@@ -897,7 +908,7 @@ function nativeDisruption(c, t, th) {
     if (c.measure(n, body, 24 * s) > c.w - 160 * s && dcur) { detailLines.push(dcur); dcur = w; } else dcur = n;
   }
   if (dcur) detailLines.push(dcur);
-  const shown = lines.slice(0, 3), det = detailLines.slice(0, 4);
+  const shown = lines.slice(0, 3), det = detailLines.slice(0, 5);
   const h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
   const y0 = (c.h - h) / 2;
   c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
@@ -1000,6 +1011,7 @@ const themeApi = {
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
   paging: () => state.cfg.custom?.paging !== false,
+  alertLines: () => state.alerts.map(fullAlertText), // stop notices with their details, for marquees
 };
 
 function cycleTheme(step = 1) {

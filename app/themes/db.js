@@ -117,7 +117,7 @@ function cityBoard(m, t, api, deps, hy) {
   });
   // ticker: disruptions for this stop
   const n = deps.map(depNotice).find(Boolean);
-  const info = [...api.state.alerts, n?.text].filter(Boolean).join('   ·   ');
+  const info = [...api.alertLines(), n?.text].filter(Boolean).join('   ·   ');
   if (info) marquee(m, api, info, 3, W - 3, m.rows - sm - 2, 'small', C.YELLOW, t);
   else m.text(api.statusText(), 3, m.rows - sm - 2, 'small', C.DIM);
   if (pg.pages > 1) m.textRight(`${pg.page + 1}/${pg.pages}`, W - 3 - textWidth('Abfahrt', 'small') - 10, hy, 'small', C.DIM);

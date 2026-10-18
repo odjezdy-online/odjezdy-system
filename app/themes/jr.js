@@ -65,7 +65,7 @@ module.exports = {
 
     // bottom ticker: disruptions / status, like the scrolling info line on JR boards
     const n = deps.map(depNotice).find(Boolean);
-    const info = [...state.alerts, n?.text].filter(Boolean).join('   ·   ') || (en ? 'Have a nice trip' : 'Šťastnou cestu') + ' · ' + api.statusText();
+    const info = [...api.alertLines(), n?.text].filter(Boolean).join('   ·   ') || (en ? 'Have a nice trip' : 'Šťastnou cestu') + ' · ' + api.statusText();
     marquee(m, api, info, 2, W - 2, m.rows - sm - 2, 'small', state.alerts.length || n ? C.ORANGE : C.GREEN, t);
     if (pg.pages > 1) m.textRight(`${pg.page + 1}/${pg.pages}`, W - 2 - textWidth(en ? 'Track' : 'Nást.', 'small') - 8, hy, 'small', C.DIM);
   },

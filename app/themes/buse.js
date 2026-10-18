@@ -118,7 +118,7 @@ module.exports = {
     // footer marquee: alerts for this stop + status
     const fy = m.rows - L.footerH + 2;
     m.hline(0, W - 1, fy - 2, C.DIM);
-    const parts = state.alerts.map((a) => '! ' + a);
+    const parts = api.alertLines().map((a) => '! ' + a);
     // statusText carries the data source credit and the offline notice ("BEZ SPOJENÍ · poslední data …")
     parts.push(`Odjezdy OS · ${api.statusText()}${state.ip ? ' · IP ' + state.ip : ''} · S = změnit zastávku`);
     const text = parts.join('   ·   ');
