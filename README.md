@@ -36,6 +36,16 @@ Vzhled se přepíná klávesou **T** nebo v úvodním menu. Většina vzhledů s
 | **Nastavení vzhledu** | | |
 | ![](docs/settings.png) | | |
 
+| ID | Další motiv | Náhled |
+|---|---|---|
+| `wiener` | Wiener Linien · Vídeň | [PNG](docs/theme-wiener.png) |
+| `mta` | MTA Countdown · New York | [PNG](docs/theme-mta.png) |
+| `sl` | SL · Stockholm | [PNG](docs/theme-sl.png) |
+| `pid` | PID · Praha | [PNG](docs/theme-pid.png) |
+| `fids` | FIDS · letištní tabule | [PNG](docs/theme-fids.png) |
+| `teletext` | Teletext · P100 | [PNG](docs/theme-teletext.png) |
+| `brutal` | Brutal · fiktivní | [PNG](docs/theme-brutal.png) |
+
 Při mimořádnosti (výluka zastávky, zrušený spoj) se přes jakýkoli vzhled pravidelně ukáže celoobrazovkové oznámení **Mimořádnost**. V nastavení jde vypnout.
 
 Vlastní vzhled zvládne kdokoli. Je to jeden JS soubor, návod je v **[docs/THEMES.md](docs/THEMES.md)**.

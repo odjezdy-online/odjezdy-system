@@ -1,5 +1,17 @@
 # Změny
 
+## Nevydáno
+
+- `wiener`: Wiener Linien · Vídeň; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `mta`: MTA Countdown · New York; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `sl`: SL · Stockholm; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `pid`: PID · Praha; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `fids`: FIDS · letištní tabule; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `teletext`: Teletext · P100; nový motiv s LED fallbackem, stránkováním a náhledem.
+- `brutal`: Brutal · fiktivní; nový motiv s LED fallbackem, stránkováním a náhledem.
+
+# Změny
+
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
 ## 0.4.3
