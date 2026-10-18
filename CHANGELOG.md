@@ -2,6 +2,10 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.4
+- Plynulý posun běžícího textu v PID vzhledech, i když je počítač nebo VM pomalé
+- Rychlejší vykreslování ploch
+
 ## 0.5.3
 - Opraveno přetékání vzhledů na displejích 16:10 a 4:3 (např. ČD klapky na 1280×800)
 - Mimořádnosti se ukážou, až když platí nebo začínají do 36 hodin
