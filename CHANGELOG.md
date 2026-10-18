@@ -2,6 +2,11 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## Nevydáno
+- Vzhled PID přepsán podle skutečného virtuálního tabla PID (ikony vozíčku a klimatizace, ikony metra, logo)
+- Nový vzhled PID tablo (LCD zastávkové tablo)
+- U dat PID se uvádí zdroj „PID (Golemio)“, oznámení PID (infotexts) se ukazují v pruhu hlášení
+
 ## 0.5.1
 - Mimořádnosti se už neusekávají: běžící text i oznámení ukážou celý text hlášení
 - Oznámení má shrnutí, podrobnosti a dobu platnosti („Platí od … do …“)

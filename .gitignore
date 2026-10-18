@@ -2,3 +2,4 @@ alpine/cache/
 alpine/out/
 node_modules/
 *.ppm
+app/fonts/ttf/PragueCitizen-*.ttf

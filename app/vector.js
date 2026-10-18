@@ -119,6 +119,103 @@ function textMask(fontName, size, str) {
   return m;
 }
 
+// ---------------------------------------------------------------- SVG icons
+// Minimal SVG support for icons made of <path> elements (M L H V C S Q T Z and arcs, absolute and relative),
+// each with its own fill. Enough for flat icon sets such as PID's; no strokes, gradients or transforms.
+function arcToCubics(x0, y0, rx, ry, rot, large, sweep, x, y) {
+  if (!rx || !ry) return [{ type: 'L', x, y }];
+  const phi = (rot * Math.PI) / 180, cp = Math.cos(phi), sp = Math.sin(phi);
+  const dx = (x0 - x) / 2, dy = (y0 - y) / 2, x1 = cp * dx + sp * dy, y1 = -sp * dx + cp * dy;
+  rx = Math.abs(rx); ry = Math.abs(ry);
+  const lam = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
+  if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+  const num = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1, den = rx * rx * y1 * y1 + ry * ry * x1 * x1;
+  const co = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx * y1) / ry, cyp = (-co * ry * x1) / rx;
+  const cx = cp * cxp - sp * cyp + (x0 + x) / 2, cy = sp * cxp + cp * cyp + (y0 + y) / 2;
+  const ang = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+  const th1 = ang(1, 0, (x1 - cxp) / rx, (y1 - cyp) / ry);
+  let dth = ang((x1 - cxp) / rx, (y1 - cyp) / ry, (-x1 - cxp) / rx, (-y1 - cyp) / ry);
+  if (!sweep && dth > 0) dth -= 2 * Math.PI; else if (sweep && dth < 0) dth += 2 * Math.PI;
+  const n = Math.max(1, Math.ceil(Math.abs(dth) / (Math.PI / 2))), step = dth / n, out = [];
+  const t = (4 / 3) * Math.tan(step / 4);
+  const pt = (a) => [cx + rx * Math.cos(a) * cp - ry * Math.sin(a) * sp, cy + rx * Math.cos(a) * sp + ry * Math.sin(a) * cp];
+  const dpt = (a) => [-rx * Math.sin(a) * cp - ry * Math.cos(a) * sp, -rx * Math.sin(a) * sp + ry * Math.cos(a) * cp];
+  for (let i = 0; i < n; i++) {
+    const a0 = th1 + i * step, a1 = a0 + step, p0 = pt(a0), p1 = pt(a1), d0 = dpt(a0), d1 = dpt(a1);
+    out.push({ type: 'C', x1: p0[0] + t * d0[0], y1: p0[1] + t * d0[1], x2: p1[0] - t * d1[0], y2: p1[1] - t * d1[1], x: p1[0], y: p1[1] });
+  }
+  return out;
+}
+function parsePathData(d) {
+  const tok = d.match(/[a-zA-Z]|-?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+  const cmds = [];
+  let i = 0, cx = 0, cy = 0, sx = 0, sy = 0, cmd = '', lastC2 = null;
+  const num = () => parseFloat(tok[i++]);
+  const isNum = () => i < tok.length && !/^[a-zA-Z]$/.test(tok[i]);
+  while (i < tok.length) {
+    if (/^[a-zA-Z]$/.test(tok[i])) cmd = tok[i++];
+    const rel = cmd === cmd.toLowerCase(), C = cmd.toUpperCase();
+    if (C === 'Z') { cmds.push({ type: 'Z' }); cx = sx; cy = sy; lastC2 = null; continue; }
+    do {
+      const ox = rel ? cx : 0, oy = rel ? cy : 0; // relative to the current point of THIS segment (implicit repeats)
+      if (C === 'M') { cx = ox + num(); cy = oy + num(); sx = cx; sy = cy; cmds.push({ type: 'M', x: cx, y: cy }); cmd = rel ? 'l' : 'L'; lastC2 = null; break; }
+      if (C === 'L') { cx = ox + num(); cy = oy + num(); cmds.push({ type: 'L', x: cx, y: cy }); lastC2 = null; }
+      else if (C === 'H') { cx = (rel ? cx : 0) + num(); cmds.push({ type: 'L', x: cx, y: cy }); lastC2 = null; }
+      else if (C === 'V') { cy = (rel ? cy : 0) + num(); cmds.push({ type: 'L', x: cx, y: cy }); lastC2 = null; }
+      else if (C === 'C' || C === 'S') {
+        let x1, y1;
+        if (C === 'C') { x1 = ox + num(); y1 = oy + num(); } else { x1 = lastC2 ? 2 * cx - lastC2[0] : cx; y1 = lastC2 ? 2 * cy - lastC2[1] : cy; }
+        const x2 = ox + num(), y2 = oy + num(), x = ox + num(), y = oy + num();
+        cmds.push({ type: 'C', x1, y1, x2, y2, x, y }); lastC2 = [x2, y2]; cx = x; cy = y;
+      } else if (C === 'Q') {
+        const x1 = ox + num(), y1 = oy + num(), x = ox + num(), y = oy + num();
+        cmds.push({ type: 'Q', x1, y1, x, y }); cx = x; cy = y; lastC2 = null;
+      } else if (C === 'A') {
+        const rx = num(), ry = num(), rot = num(), large = num(), sweep = num(), x = ox + num(), y = oy + num();
+        cmds.push(...arcToCubics(cx, cy, rx, ry, rot, large, sweep, x, y)); cx = x; cy = y; lastC2 = null;
+      } else { i = tok.length; break; } // unsupported command: stop here
+    } while (isNum());
+  }
+  return cmds;
+}
+const svgCache = new Map();
+function parseSvg(text) {
+  let s = svgCache.get(text);
+  if (s) return s;
+  const vb = (text.match(/viewBox="([^"]+)"/) || [])[1];
+  const [vx, vy, vw, vh] = vb ? vb.split(/[\s,]+/).map(Number) : [0, 0, 100, 100];
+  const paths = [...text.matchAll(/<path\b([^>]*)>/g)].map((m) => {
+    const d = (m[1].match(/\bd="([^"]+)"/) || [])[1];
+    const fill = (m[1].match(/\bfill="([^"]+)"/) || m[1].match(/fill:\s*([^;"]+)/) || [])[1];
+    let rgb = null;
+    const h = (fill || '').match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (h) { const x = h[1].length === 3 ? h[1].replace(/./g, '$&$&') : h[1]; rgb = [0, 2, 4].map((k) => parseInt(x.slice(k, k + 2), 16)); }
+    return { cmds: d ? parsePathData(d) : [], rgb };
+  }).filter((p) => p.cmds.length);
+  s = { id: svgCache.size + 1, vx, vy, vw, vh, paths };
+  svgCache.set(text, s);
+  return s;
+}
+const svgMasks = new Map();
+// alpha mask of one SVG path scaled to w x h pixels (cached)
+function svgMask(svg, pi, w, h) {
+  const key = svg.id + '|' + pi + '|' + Math.ceil(w) + 'x' + Math.ceil(h);
+  let m = svgMasks.get(key);
+  if (m) return m;
+  const k = Math.min(w / svg.vw, h / svg.vh), ox = (w - svg.vw * k) / 2, oy = (h - svg.vh * k) / 2;
+  const tx = (cmd) => {
+    const o = { ...cmd };
+    for (const f of ['x', 'x1', 'x2']) if (f in o) o[f] = (o[f] - svg.vx) * k + ox;
+    for (const f of ['y', 'y1', 'y2']) if (f in o) o[f] = (o[f] - svg.vy) * k + oy;
+    return o;
+  };
+  m = rasterise(flatten(svg.paths[pi].cmds.map(tx), SS), Math.ceil(w), Math.ceil(h));
+  svgMasks.set(key, m);
+  if (svgMasks.size > 200) svgMasks.delete(svgMasks.keys().next().value);
+  return m;
+}
+
 // ---------------------------------------------------------------- canvas
 class Canvas {
   constructor(w, h) {
@@ -191,6 +288,18 @@ class Canvas {
         }
       }
     }
+  }
+  // draw an icon made of SVG <path>s into the box (x, y, w, h), fitted and centred; color overrides the paths' own fills
+  svg(text, x, y, w, h, { color = null } = {}) {
+    const sv = parseSvg(text);
+    sv.paths.forEach((p, i) => {
+      const col = color || p.rgb || [255, 255, 255], mk = svgMask(sv, i, w, h), mw = Math.ceil(w);
+      const bx = Math.round(x), by = Math.round(y);
+      for (let yy = 0; yy < Math.ceil(h); yy++) for (let xx = 0; xx < mw; xx++) {
+        const a = mk[yy * mw + xx];
+        if (a) this.blend(bx + xx, by + yy, col, a);
+      }
+    });
   }
   measure(str, font, size) {
     const f = findFont(font);

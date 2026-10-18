@@ -669,7 +669,8 @@ async function fetchBoardRows(ids) {
   if (await hasApiV2()) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
-      state.v2Alerts = (j.alerts || []).map(noteAlert).filter(Boolean);
+      // PID notices from the departure board itself (infotexts: inline strip / full-screen) plus our alerts
+      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...(j.alerts || []).map(noteAlert)].filter(Boolean);
       return j.data || [];
     } catch (e) {
       if (!/^HTTP (404|400)/.test(e.message)) throw e;
@@ -934,8 +935,9 @@ const platformOf = (d) => {
 };
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
-  const src = isTransitous() ? 'data Transitous · transitous.org/sources'
-    : state.fallback ? `záložní data Transitous (odjezdy.online: ${state.fallback}) · transitous.org/sources` : 'data odjezdy.online';
+  const pid = state.deps.some((d) => d.provider === 'PID') ? ' · data PID (Golemio)' : ''; // attribution for PID data
+  const src = (isTransitous() ? 'data Transitous · transitous.org/sources'
+    : state.fallback ? `záložní data Transitous (odjezdy.online: ${state.fallback}) · transitous.org/sources` : 'data odjezdy.online') + pid;
   // offline with older data: say clearly how old the shown timetable is
   if ((state.error || state.fromCache) && state.lastOk && !(state.fallback && !state.error)) return `BEZ SPOJENÍ · poslední data ${hhmm(new Date(state.lastOk))}${state.error ? ' (' + state.error + ')' : ''} · ${src}`;
   if (state.error) return `bez spojení (${state.error}) · ${src}`;

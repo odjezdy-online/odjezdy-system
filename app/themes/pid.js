@@ -6,13 +6,24 @@
 // and the time with a blinking colon. Imitates the look only; the PID typeface and logo are replaced by free
 // stand-ins (Fira Sans, Barlow Condensed, a plain "PID" mark).
 const { simpleLed } = require('./_simple');
+const fs = require('fs');
+const path = require('path');
 const { pageAt, pageCount } = require('./_util');
+
+// PID's own icons (MIT, see app/assets/pid)
+const ICON = {};
+for (const n of ['accessible', 'snowflake', 'logo_pid', 'metro-a', 'metro-b', 'metro-c']) {
+  try { ICON[n] = fs.readFileSync(path.join(__dirname, '..', 'assets', 'pid', n + '.svg'), 'utf8'); } catch {}
+}
 
 const K = {
   bg: [0, 0, 0], rows: [54, 54, 53], white: [255, 255, 255], grey: [226, 226, 226], delay: [207, 102, 27],
   cancel: [255, 102, 51], dark: [34, 34, 34],
 };
-const F = { semi: 'FiraSans-SemiBold', reg: 'FiraSans-Regular', cond: 'BarlowCondensed-Medium', bold: 'FiraSans-Bold' };
+const FALLBACK = { semi: 'FiraSans-SemiBold', reg: 'FiraSans-Regular', cond: 'BarlowCondensed-Medium', bold: 'FiraSans-Bold' };
+const PRAGUE = { semi: 'PragueCitizen-SemiBold', reg: 'PragueCitizen-Regular', cond: 'PragueCitizen-RegularCondensed', bold: 'PragueCitizen-SemiBold' };
+let F = FALLBACK; // Prague Citizen when installed (see app/assets/pid/README.md)
+
 
 module.exports = {
   id: 'pid',
@@ -25,6 +36,7 @@ module.exports = {
   nativeFont: F.semi,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, minutesTo, platformOf, stopLabel } = api;
+    F = api.vector().findFont(PRAGUE.semi) && api.vector().findFont(PRAGUE.cond) ? PRAGUE : FALLBACK;
     // everything is laid out in the original's 1920x1080 pixels and scaled
     const s = Math.min(c.w / 1920, c.h / 1080), W = c.w, H = c.h, pad = 25 * s;
     c.clear(K.bg);
@@ -35,8 +47,8 @@ module.exports = {
     T(stopLabel(state.cfg.stop), pad, headerH * 0.58, 90, K.white, { maxW: W - 2 * pad - 260 * s });
     const city = state.cfg.stop?.city;
     if (city) T(city, pad, headerH * 0.58 + 52 * s, 36, K.white, { font: F.reg, maxW: W - 2 * pad - 260 * s });
-    c.roundRect(W - pad - 165 * s, headerH * 0.5 - 62 * s, 165 * s, 124 * s, 14 * s, K.white);
-    T('PID', W - pad - 82.5 * s, headerH * 0.5 + 24 * s, 76, K.bg, { font: F.bold, align: 'center' });
+    if (ICON.logo_pid) c.svg(ICON.logo_pid, W - pad - 172 * s, (headerH - 125 * s) / 2, 172 * s, 125 * s);
+    else T('PID', W - pad, headerH * 0.5 + 24 * s, 76, K.white, { font: F.bold, align: 'right' });
     c.rect(pad, headerH - line, W - 2 * pad, line, K.white);
 
     // ---- rows
@@ -51,25 +63,36 @@ module.exports = {
     const pg = pageAt(t, 8000, pages);
     const timeMode = deps.slice(pg * per, pg * per + per).some((d) => minutesTo(d) >= 60);
     const depW = (timeMode ? 270 : 180) * s, platCx = W - pad - depW - 60 * s;
-    const routeR = pad + 165 * s, headX = routeR + 20 * s, headR = platCx + 60 * s - 10 * s;
+    const pageRows = deps.slice(pg * per, pg * per + per);
+    const lfOf = (d) => d.lowFloor ?? d.isWheelchairAccessible, acOf = (d) => d.airConditioned ?? d.isAirConditioned;
+    const hasLF = pageRows.some((d) => lfOf(d) === true), hasAC = pageRows.some((d) => acOf(d) === true);
+    const routeR = pad + 165 * s, lfW = (hasLF ? 90 : 20) * s, acW = (hasAC ? 70 : 0) * s;
+    const headX = routeR + lfW + acW, headR = platCx + 60 * s - 10 * s;
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y0 = headerH + i * rowH, base = y0 + rowH * 0.68;
       if (i < per - 1) c.rect(pad, y0 + rowH - line / 2, W - 2 * pad, line, K.white);
       const mins = minutesTo(d), late = d.delayMinutes > 0;
       const rt = d.delayMinutes == null; // no real-time data: scheduled time only
       const col = d.cancelled ? K.white : late ? K.delay : rt ? K.grey : K.white;
-      T(String(d.line ?? ''), routeR, base, 65, K.white, { align: 'right', maxW: 160 * s });
+      const metro = (d.type === 'metro' || d.type === 'subway') && ICON['metro-' + String(d.line).toLowerCase()];
+      if (metro) c.svg(metro, routeR - 75 * s, y0 + rowH / 2 - 37.5 * s, 75 * s, 75 * s); // PID's A/B/C icons
+      else T(String(d.line ?? ''), routeR, base, 65, K.white, { align: 'right', maxW: 160 * s });
+      if (lfOf(d) === true && ICON.accessible) c.svg(ICON.accessible, routeR + 20 * s, y0 + rowH / 2 - 25 * s, 50 * s, 50 * s, { color: K.white });
+      if (acOf(d) === true && ICON.snowflake) c.svg(ICON.snowflake, routeR + lfW + 10 * s, y0 + rowH / 2 - 25 * s, 50 * s, 50 * s, { color: K.white });
       const dest = String(d.destination || 'cíl neuveden');
       const dw = Math.min(c.measure(dest, F.semi, 65 * s), headR - headX - (d.cancelled ? 190 * s : 0));
       T(dest, headX, base, 65, K.white, { maxW: headR - headX - (d.cancelled ? 190 * s : 0) });
       const when = mins <= 0 ? '<1 min' : mins < 60 ? `${mins} min` : hhmm(new Date(d.plannedTime || depTime(d)));
       const ww = c.measure(when, F.cond, 65 * s);
-      T(when, W - pad, base, 65, col, { font: F.cond, align: 'right' });
+      const dl = late && mins >= 60 ? (d.delayMinutes > 99 ? '>99' : '+' + String(d.delayMinutes).padStart(2, '0')) : ''; // original: +05, >99
+      T(when, W - pad - (dl ? 100 * s : 0), base, 65, mins >= 60 ? K.white : col, { font: F.cond, align: 'right' });
+      if (dl) T(dl, W - pad, base, 65, K.delay, { font: F.cond, align: 'right' });
       if (d.cancelled) {
         // struck through in orange-red, with the small message at the right end of the destination
         c.rect(headX, base - 24 * s, dw, 5 * s, K.cancel);
         c.rect(W - pad - ww, base - 24 * s, ww, 5 * s, K.cancel);
-        T('ZRUŠENO', headR, base - 20 * s, 28, K.cancel, { font: F.reg, align: 'right' });
+        T('zrušeno', headR, base - 30 * s, 28, K.cancel, { font: F.reg, align: 'right' });
+        T('canceled', headR, base + 2 * s, 28, K.cancel, { font: F.reg, align: 'right' });
       }
       const plat = platformOf(d);
       if (plat) { // white circle with the platform / stop mark

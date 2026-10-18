@@ -42,6 +42,7 @@ Vzhled se přepíná klávesou **T** nebo v úvodním menu. Většina vzhledů s
 | `mta` | MTA Countdown · New York | [PNG](docs/theme-mta.png) |
 | `sl` | SL · Stockholm | [PNG](docs/theme-sl.png) |
 | `pid` | PID · Praha | [PNG](docs/theme-pid.png) |
+| `pidtablo` | PID tablo · LCD zastávkové tablo PID (šedé řádky, barevné boxy linek) | [PNG](docs/theme-pidtablo.png) |
 | `fids` | FIDS · letištní tabule | [PNG](docs/theme-fids.png) |
 | `teletext` | Teletext · P100 | [PNG](docs/theme-teletext.png) |
 | `brutal` | Brutal · fiktivní | [PNG](docs/theme-brutal.png) |
