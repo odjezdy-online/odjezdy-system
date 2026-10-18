@@ -224,7 +224,7 @@ function perfTick() {
   Object.assign(perf, { frames: 0, render: 0, convert: 0, write: 0, bytes: 0, lagMax: 0, since: Date.now() });
 }
 let lagAt = Date.now();
-let qualityFactor = 1, slowFrames = 0; // the native canvas is rendered at 1/qualityFactor of the screen size and enlarged (VMs)
+let qualityFactor = 1, slowFrames = 0, fastFrames = 0; const bootAt = Date.now(); // the native canvas is rendered at 1/qualityFactor of the screen size and enlarged (VMs)
 const mice = new Map(); // eventN -> { fd, absMax }
 function startMouse() {
   // Only pointing devices (mice, tablets, touchscreens): /proc/bus/input/devices lists a "mouseN"
@@ -995,8 +995,13 @@ function renderNativeBoard(t) {
   // auto quality: a few slow frames in a row while the time goes into rendering/conversion (not into writing,
   // which a smaller canvas does not speed up) -> render smaller; at most half size (1/3 only by the setting)
   if (qs === 'auto') {
-    if (t3 - t1 > 160 && writeMs < (t3 - t1) * 0.45 && qualityFactor < 2) { if (++slowFrames >= 3) { qualityFactor++; slowFrames = 0; nativeCanvas = null; nativeCost = 0; log(`quality: frames too slow (${t3 - t1} ms), rendering at 1/${qualityFactor}`); } }
-    else slowFrames = 0;
+    if (Date.now() - bootAt > 10000 && t3 - t1 > 160 && writeMs < (t3 - t1) * 0.45 && qualityFactor < 2) { if (++slowFrames >= 8) { qualityFactor++; slowFrames = 0; nativeCanvas = null; nativeCost = 0; log(`quality: frames too slow (${t3 - t1} ms), rendering at 1/${qualityFactor}`); } }
+    else {
+      slowFrames = 0;
+      // back to full quality once the smaller canvas shows frames are cheap (cost at full size ~ cost x f^2)
+      if (qualityFactor > 1 && nativeCost * qualityFactor * qualityFactor < 100) { if (++fastFrames >= 40) { qualityFactor--; fastFrames = 0; nativeCanvas = null; nativeCost = 0; log('quality: frames fast again, rendering at 1/' + qualityFactor); } }
+      else fastFrames = 0;
+    }
   }
   return true;
 }
@@ -1128,6 +1133,7 @@ const themeApi = {
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
   paging: () => state.cfg.custom?.paging !== false,
+  tickCount: () => state.tickN || 0, // counts display ticks: LED marquees move exactly one dot per tick
   scroller: (cv, o) => scrollerRegister(cv, o), // marquee that keeps moving between theme frames (see scrollers)
   alertLines: () => state.alerts.map(fullAlertText), // stop notices with their details, for marquees
 };
@@ -2136,6 +2142,7 @@ function checkFb() {
 
 function tick() {
   if (!ownVtActive()) return;
+  state.tickN = (state.tickN || 0) + 1;
   const t = Date.now() - t0;
   m.clear();
   hits.length = 0;
@@ -2250,7 +2257,7 @@ async function main() {
     const alertsLoop = async () => { try { await refreshAlerts(); } catch {} setTimeout(alertsLoop, 120000); };
     setTimeout(alertsLoop, 3000);
     pointer.enabled = false;
-    setInterval(tick, 66);
+    setInterval(tick, 50);
     return;
   }
   process.stdout.write('\x1b[?25l\x1b[2J'); // hide console cursor
@@ -2281,7 +2288,7 @@ async function main() {
   pointer.enabled = state.cfg.custom?.cursor !== false;
   pointer.x = screen.w / 2; pointer.y = screen.h / 2;
   startMouse();
-  setInterval(tick, 66);
+  setInterval(tick, 50);
   setInterval(scrollTick, 33);
   setInterval(() => { const n = Date.now(); perf.lagMax = Math.max(perf.lagMax, n - lagAt - 100); lagAt = n; }, 100); // how late a 100 ms timer fires
   setInterval(perfTick, 10000);

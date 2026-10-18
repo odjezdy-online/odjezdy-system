@@ -43,7 +43,8 @@ const clockText = (api) => { const d = new Date(); return `${api.hhmm(d)}:${api.
 function marquee(m, api, text, x0, x1, y, size, c, t, speed = 40) {
   const w = api.textWidth(text, size);
   if (w <= x1 - x0) { m.text(text, x0, y, size, c); return; }
-  const gap = 30, off = Math.floor(t / speed) % (w + gap);
+  // one dot per tick: with the time-based step (t / speed) and a fixed tick the step alternated between 1 and 2 dots
+  const gap = 30, off = (api.tickCount ? api.tickCount() : Math.floor(t / speed)) % (w + gap);
   m.text(text, x0 - off, y, size, c, x0, x1);
   m.text(text, x0 - off + w + gap, y, size, c, x0, x1);
 }

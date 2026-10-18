@@ -107,7 +107,7 @@ module.exports = {
         const w = textWidth(notice.text, 'small');
         if (w <= x1 - x0) m.text(notice.text, x0, ny, 'small', notice.color);
         else { // too long: scroll inside the notice row only, from the start of the page
-          const off = Math.max(0, Math.floor((pageT - 1000) / SCROLL_MS)) % (w + GAP);
+          const off = (api.tickCount ? Math.max(0, api.tickCount() - 20) : Math.floor((pageT - 1000) / SCROLL_MS)) % (w + GAP); // one dot per tick
           m.text(notice.text, x0 - off, ny, 'small', notice.color, x0, x1);
           m.text(notice.text, x0 - off + w + GAP, ny, 'small', notice.color, x0, x1);
         }
@@ -123,7 +123,7 @@ module.exports = {
     parts.push(`Odjezdy OS · ${api.statusText()}${state.ip ? ' · IP ' + state.ip : ''} · S = změnit zastávku`);
     const text = parts.join('   ·   ');
     const tw = textWidth(text, 'normal') + 40;
-    const x = W - (Math.floor(t / 40) % (tw + W));
+    const x = W - ((api.tickCount ? api.tickCount() : Math.floor(t / 40)) % (tw + W)); // one dot per tick: even steps
     const offline = (state.error || state.fromCache) && state.lastOk;
     m.text(text, x, fy, 'normal', offline ? C.RED : state.alerts.length ? C.AMBER : C.DIM);
   },
