@@ -359,6 +359,7 @@ function makeStrip(text, font, size, color, bg, h, baseline) {
 }
 // copy a window of the looping strip (offset in px, gap between repeats) into the canvas at x,y of size w x h
 function paintStrip(cv, strip, x, y, w, h, offset, gap, bg) {
+  gap = Math.round(gap); // integer: a fractional gap gave fractional source indexes and shifted the colour channels
   const total = strip.w + gap, off = ((Math.floor(offset) % total) + total) % total;
   for (let r = 0; r < Math.min(h, strip.h); r++) {
     const dy = y + r;

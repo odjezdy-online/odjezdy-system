@@ -934,7 +934,7 @@ function scrollerRegister(cv, o) {
   const strip = vector.makeStrip(o.text, o.font, o.size, o.color, o.bg, o.h, o.baseline);
   const key = o.text.slice(0, 200) + '|' + Math.round(o.w);
   if (!scrollPhase.has(key)) { if (scrollPhase.size > 20) scrollPhase.clear(); scrollPhase.set(key, Date.now()); }
-  const sc = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h), strip, speed: o.speed || 90, gap: o.gap || 120, bg: o.bg, t0: scrollPhase.get(key) };
+  const sc = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h), strip, speed: o.speed || 90, gap: Math.round(o.gap || 120), bg: o.bg, t0: scrollPhase.get(key) };
   if (strip.w <= sc.w) { scrollerPaint(cv, { ...sc, speed: 0 }, sc.t0); return; } // fits: static, nothing to animate
   scrollers.push(sc);
   scrollerPaint(cv, sc, Date.now()); // paint where the text is NOW (painting at the start made it jump back at every theme re-render)
@@ -1015,7 +1015,7 @@ function nativeDisruption(c, t, th) {
   let cur = '';
   for (const w of words) {
     const n = cur ? cur + ' ' + w : w;
-    if (c.measure(n, font, 30 * s) > c.w - 160 * s && cur) { lines.push(cur); cur = w; } else cur = n;
+    if (c.measure(n, font, 30 * s) > c.w - 240 * s && cur) { lines.push(cur); cur = w; } else cur = n;
   }
   if (cur) lines.push(cur);
   // body text in the regular cut of the theme font; not every family has one (Barlow Condensed: Medium)
@@ -1026,7 +1026,7 @@ function nativeDisruption(c, t, th) {
   let dcur = '';
   for (const w of String(info.details || '').split(/\s+/).filter(Boolean)) {
     const n = dcur ? dcur + ' ' + w : w;
-    if (c.measure(n, body, 24 * s) > c.w - 160 * s && dcur) { detailLines.push(dcur); dcur = w; } else dcur = n;
+    if (c.measure(n, body, 24 * s) > c.w - 240 * s && dcur) { detailLines.push(dcur); dcur = w; } else dcur = n;
   }
   if (dcur) detailLines.push(dcur);
   const shown = lines.slice(0, 3), det = detailLines.slice(0, 5);
