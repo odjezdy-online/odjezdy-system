@@ -610,7 +610,16 @@ async function getJson(p, timeout = 25000) {
   } finally { clearTimeout(t); }
 }
 
-const depTime = (d) => new Date(d.expectedTime || d.plannedTime).getTime();
+// Real departure time: the expected time when the source gives one. Some sources (ČD trains) send a delay but no
+// expected time, or one that is not shifted by it: then it is planned time + delay, so a delayed train stays on the
+// board until it really leaves instead of vanishing at its planned time.
+function depTime(d) {
+  const p = new Date(d.plannedTime).getTime();
+  let e = d.expectedTime ? new Date(d.expectedTime).getTime() : p;
+  const delay = Number.isFinite(d.delayMinutes) ? d.delayMinutes * 60000 : Number.isFinite(d.delaySeconds) ? d.delaySeconds * 1000 : 0;
+  if (delay >= 60000 && e < p + delay - 30000) e = p + delay;
+  return e;
+}
 // MOTIS mode -> our vehicle types
 const MOTIS_TYPE = {
   TRAM: 'tram', SUBWAY: 'metro', METRO: 'metro', BUS: 'bus', COACH: 'bus', TROLLEYBUS: 'trolleybus', FERRY: 'ferry',
@@ -789,7 +798,7 @@ async function refreshBoard() {
   state.fallback = null;
   const now = Date.now(), seen = new Map(), all = [];
   for (const d of rows) {
-    if (!d.expectedTime) d.expectedTime = d.plannedTime;
+    if (!d.expectedTime || new Date(d.expectedTime).getTime() !== depTime(d)) d.expectedTime = new Date(depTime(d)).toISOString(); // shown as the new time by themes
     if (depTime(d) < now - 60000) continue;
     // richer fields from the odjezdy.online rewrite backend (absent on the old API -> no change)
     if (d.terminatesHere) continue; // the train ends here: an arrival, not a departure
@@ -925,7 +934,7 @@ let nativeCanvas = null, lastNative = 0, lastCursorDraw = 0, nativeCost = 0;
 // text is rendered once into a strip and a small window of it is copied into the canvas and the screen every ~33 ms,
 // so scrolling stays smooth even when the whole theme can only be re-rendered a few times a second (VMs, 1080p).
 const scrollers = [];
-let lastScroll = 0;
+let lastScroll = 0, overlayRect = null; // where the full-screen notice covers the canvas (scrollers must not paint there)
 function scrollerPaint(cv, sc, now) {
   vector.paintStrip(cv, sc.strip, sc.x, sc.y, sc.w, sc.h, ((now - sc.t0) / 1000) * sc.speed, sc.gap, sc.bg);
 }
@@ -942,11 +951,14 @@ function scrollerRegister(cv, o) {
 // called every ~33 ms: move the scrollers, convert only their rectangles, write only the changed rows
 function scrollTick() {
   if (!scrollers.length || !nativeCanvas || !screen || state.mode !== 'board' || PNG_OUT) return;
-  if (state.cfg.custom?.disruptions !== false && disruptionSlot(Date.now() - t0)) return; // a notice is on screen
   if (!ownVtActive()) return;
-  const now = Date.now();
-  for (const sc of scrollers) scrollerPaint(nativeCanvas, sc, now);
-  screen.drawCanvas(nativeCanvas, true, scrollers);
+  const now = Date.now(), notice = state.cfg.custom?.disruptions !== false && disruptionSlot(now - t0);
+  // while a notice is on screen the scrollers keep running, except those that would paint over the notice
+  const r = notice ? (overlayRect || { x: 0, y: 0, w: 1e9, h: 1e9 }) : null;
+  const live = r ? scrollers.filter((sc) => !(sc.x < r.x + r.w && sc.x + sc.w > r.x && sc.y < r.y + r.h && sc.y + sc.h > r.y)) : scrollers;
+  if (!live.length) return;
+  for (const sc of live) scrollerPaint(nativeCanvas, sc, now);
+  screen.drawCanvas(nativeCanvas, true, live);
 }
 function renderNativeBoard(t) {
   const th = currentTheme();
@@ -972,7 +984,7 @@ function renderNativeBoard(t) {
   if (qs !== 'auto' && Number(qs) !== qualityFactor) { qualityFactor = Math.max(1, Math.min(4, Number(qs) || 1)); nativeCanvas = null; }
   const cw = Math.ceil(screen.w / qualityFactor), ch = Math.ceil(screen.h / qualityFactor);
   if (!nativeCanvas || nativeCanvas.w !== cw || nativeCanvas.h !== ch) { nativeCanvas = new vector.Canvas(cw, ch); screen.qf = qualityFactor; screen.shown = null; }
-  scrollers.length = 0;
+  scrollers.length = 0; overlayRect = null;
   try {
     th.renderNative(nativeCanvas, t, themeApi);
     if (state.cfg.custom?.disruptions !== false) nativeDisruption(nativeCanvas, t, th);
@@ -1009,7 +1021,7 @@ function nativeDisruption(c, t, th) {
   const slot = disruptionSlot(t);
   if (!slot) return;
   const text = slot.text;
-  if (typeof th.renderAlertNative === 'function') return th.renderAlertNative(c, t, themeApi, text);
+  if (typeof th.renderAlertNative === 'function') { overlayRect = { x: 0, y: 0, w: c.w, h: c.h }; return th.renderAlertNative(c, t, themeApi, text); }
   const s = c.h / 720, font = th.nativeFont || 'FiraSans-Bold';
   const words = String(text).split(/\s+/), lines = [];
   let cur = '';
@@ -1032,6 +1044,7 @@ function nativeDisruption(c, t, th) {
   const shown = lines.slice(0, 3), det = detailLines.slice(0, 5);
   const h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
   const y0 = (c.h - h) / 2;
+  overlayRect = { x: 60 * s, y: y0, w: c.w - 120 * s, h };
   c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
   c.rect(60 * s, y0, 14 * s, h, [236, 0, 22]);
   c.text('Mimořádnost', 110 * s, y0 + 62 * s, { font, size: 40 * s, color: [236, 0, 22] });
