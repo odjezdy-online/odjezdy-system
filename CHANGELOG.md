@@ -2,6 +2,12 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.3
+- Opraveno přetékání vzhledů na displejích 16:10 a 4:3 (např. ČD klapky na 1280×800)
+- Mimořádnosti se ukážou, až když platí nebo začínají do 36 hodin
+- Hlášení jiného dopravce už se neukazuje u cizí zastávky (DÚK hlášení v Praze)
+- Doba platnosti jednodenního hlášení: „Platí 31. 10. 6:30–17:30“
+
 ## 0.5.2
 - Vzhled PID přepsán podle skutečného virtuálního tabla PID (ikony vozíčku a klimatizace, ikony metra, logo)
 - Nový vzhled PID tablo (LCD zastávkové tablo)
