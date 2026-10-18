@@ -644,7 +644,7 @@ async function fetchBoardRows(ids) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
       const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
-      state.v2Alerts = (j.alerts || []).map((a) => clean(a.title)).filter(Boolean);
+      state.v2Alerts = (j.alerts || []).map((a) => clean(a.summary || a.title)).filter(Boolean);
       return j.data || [];
     } catch (e) {
       if (!/^HTTP (404|400)/.test(e.message)) throw e;
@@ -733,7 +733,7 @@ async function refreshAlerts() {
   state.alerts = list.filter((a) =>
     (a.stops || []).some((s) => norm(s) === name || name.includes(norm(s))) ||
     (a.provider === 'PID' && (a.lines || []).some((l) => lines.has(String(l))))
-  ).map((a) => clean(a.title));
+  ).map((a) => clean(a.summary || a.title));
   state.alerts = [...new Set([...state.alerts, ...(state.v2Alerts || [])])].slice(0, 6); // + alerts from /api/v2
   // line-level notices -> second (small-font) row under that departure.
   // Matched via a.lines, or by the line being named in the title — only for codes like "X12"
