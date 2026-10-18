@@ -2,6 +2,13 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.5
+- Opraveno skákání běžícího textu zpět na začátek při překreslení vzhledu
+- Tabule už nezapisuje celý snímek každé 2 s (škubnutí ve virtuálních počítačích)
+- Nová volba Kvalita obrazu (automatická, plná, poloviční, třetinová)
+- Klávesa V ukáže čísla výkonu (snímky za sekundu, doba vykreslení a zápisu)
+- Rychlejší vykreslování ploch a zaoblených obdélníků
+
 ## 0.5.4
 - Plynulý posun běžícího textu v PID vzhledech, i když je počítač nebo VM pomalé
 - Rychlejší vykreslování ploch
