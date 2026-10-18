@@ -1375,6 +1375,17 @@ function openUpdate(manual) {
     }).catch((e) => { u.msg = null; u.err = 'Nelze zjistit: ' + (e.cause?.code || e.message); });
   }
 }
+// release notes as bullet lines: GitHub's auto text ("What's Changed", "… by @user in https://…", "Full
+// Changelog") and links are dropped, markdown decoration stripped
+function cleanNotes(text) {
+  const out = [];
+  for (let l of String(text || '').split('\n')) {
+    l = l.replace(/https?:\/\/\S+/g, '').replace(/\s+by\s+@?\S+\s+in\s*$/i, '').replace(/^[#*\-\s]+/, '').replace(/\*+/g, '').trim();
+    if (!l || /^(what'?s changed|full changelog|new contributors)/i.test(l) || /^\S+ made their first contribution/i.test(l)) continue;
+    out.push(l);
+  }
+  return [...new Set(out)];
+}
 const UPDATE_CHOICES = [
   { label: 'Aktualizovat', act: () => runUpdate() },
   { label: 'Později', act: () => { state.mode = 'board'; } },
@@ -1406,12 +1417,18 @@ function renderUpdate(m, t) {
     m.text(fitText(`Je k dispozici nová verze ${u.info.version}`, 'normal', W - 4), 2, y, 'normal', C.WHITE);
     y += L.rowH + 2;
     if (LIVE) { // RAM-only system: say so, the lasting fix is the new ISO
-      m.text(fitText('Běží z živého média: aktualizace vydrží jen do restartu. Trvale: nové ISO z GitHub Releases.', 'small', W - 4), 2, y, 'small', C.YELLOW);
-      y += L.sm + 4;
+      for (const l of wrapText('Běží z živého média: aktualizace vydrží jen do restartu. Trvale pomůže jen nové ISO z GitHub Releases.', 'small', W - 4, 2)) { m.text(l, 2, y, 'small', C.YELLOW); y += L.sm + 2; }
+      y += 2;
     }
-    const notes = u.info.notes.split('\n').map((l) => l.replace(/^[#*\-\s]+/, '').trim()).filter(Boolean);
-    const room = Math.max(0, Math.floor((m.rows - y - (L.rowH + 6) * 2 - L.sm - 6) / (L.sm + 2)));
-    for (const l of notes.slice(0, room)) { m.text(fitText('· ' + l, 'small', W - 6), 4, y, 'small', C.DIM); y += L.sm + 2; }
+    const notes = cleanNotes(u.info.notes);
+    let room = Math.max(0, Math.floor((m.rows - y - (L.rowH + 6) * 2 - L.sm - 6) / (L.sm + 2)));
+    for (const l of notes) {
+      for (const [k, part] of wrapText(l, 'small', W - 12, 2).entries()) {
+        if (room-- <= 0) break;
+        m.text((k ? '  ' : '· ') + part, 4, y, 'small', C.DIM); y += L.sm + 2;
+      }
+    }
+    if (!notes.length) m.text('Poznámky k vydání nejsou k dispozici.', 4, y, 'small', C.DIM);
   }
   y = Math.max(y + 4, m.rows - (L.rowH + 4) * 2 - L.sm - 6);
   if (u.err) m.text(fitText(u.err, 'small', W - 4), 2, y, 'small', C.RED);
@@ -1948,7 +1965,7 @@ async function main() {
       }
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
-    if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: '- Nové vzhledy tabulí\n- Opravy kreslení na konzoli', size: 4200000 } }; openUpdate(false); }
+    if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
     if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
