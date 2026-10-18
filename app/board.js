@@ -1022,7 +1022,7 @@ function openStart(withCountdown) {
   items.push({ browse: true, label: 'Vybrat podle kraje, okresu a obce…' });
   items.push({ search: true, label: 'Hledat jinou zastávku…' });
   items.push({ world: true, label: 'Hledat ve světě (Transitous)…' });
-  items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name });
+  items.push({ theme: true, label: 'Vzhled tabule: ' + currentTheme().name + ' (vybrat ze seznamu)…' });
   items.push({ settings: true, label: 'Nastavení vzhledu (barva, styl, jas, kurzor)…' });
   if (state.displays.length > 1) items.push({ displays: true, label: `Displeje (${state.displays.length})…` });
   if (system.wifi.available()) items.push({ wifi: true, label: 'Wi-Fi a síť…' });
@@ -1337,7 +1337,7 @@ function pickStart(it) {
   if (it.wifi) { openWifi(); return; }
   if (it.displays) { state.mode = 'displays'; state.dispSel = 0; return; }
   if (it.install) { openInstall(); return; }
-  if (it.theme) { cycleTheme(1); it.label = 'Vzhled tabule: ' + currentTheme().name; return; }
+  if (it.theme) { openThemes(); return; }
   if (it.search) { state.mode = 'setup'; state.query = ''; state.results = []; state.sel = 0; }
   else chooseStop(it.stop);
 }
@@ -1741,6 +1741,46 @@ function wifiKey(k) {
   else if (k === 'r' || k === 'R') wifiRefresh();
 }
 
+// ---------------------------------------------------------------- theme picker
+// All themes in a list; moving the selection applies the theme at once (the list is drawn in it), Enter or
+// a click keeps it, Esc goes back to the theme that was active before.
+function openThemes() {
+  state.mode = 'themes';
+  state.themeBackup = state.cfg.theme;
+  state.themeSel = Math.max(0, THEMES.indexOf(currentTheme()));
+}
+function themePreview(i) {
+  state.themeSel = i;
+  state.cfg.theme = THEMES[i].id; // not saved until confirmed
+}
+function themesConfirm() {
+  saveConfig(state.cfg);
+  state.toast = { text: 'Vzhled: ' + currentTheme().name, until: Date.now() + 2000 };
+  state.mode = 'board';
+}
+function renderThemes(m, t) {
+  const W = m.cols, L = layout(m);
+  m.text('Vzhled tabule', 1, 1, 'big', C.AMBER);
+  m.textRight(`${state.themeSel + 1} z ${THEMES.length}`, W - 2, 3, 'small', C.DIM);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  const y0 = L.headerLine + 4, rows = Math.max(1, Math.floor((m.rows - y0 - L.sm - 6) / L.rowH));
+  const first = Math.min(Math.max(0, state.themeSel - Math.floor(rows / 2)), Math.max(0, THEMES.length - rows));
+  THEMES.slice(first, first + rows).forEach((th, k) => {
+    const i = first + k, y = y0 + k * L.rowH, on = i === state.themeSel;
+    if (on) m.text('>', 2, y, 'normal', C.WHITE);
+    m.text(fitText(th.name, 'normal', W * 0.66), 9, y, 'normal', on ? C.WHITE : C.AMBER);
+    m.textRight(typeof th.renderNative === 'function' ? 'vektorový' : 'LED body', W - 2, y, 'small', C.DIM);
+    hits.push({ x0: 0, y0: y - 1, x1: W, y1: y + L.rowH - 2, hover: () => { if (state.themeSel !== i) themePreview(i); }, click: () => { themePreview(i); themesConfirm(); } });
+  });
+  m.text('Šipky = náhled · Enter = použít · Esc = zpět', 2, m.rows - L.sm - 1, 'small', C.DIM);
+}
+function themesKey(k) {
+  if (k === '\u001b') { state.cfg.theme = state.themeBackup; return openStart(false); }
+  if (k === '\u001b[A') themePreview((state.themeSel + THEMES.length - 1) % THEMES.length);
+  else if (k === '\u001b[B') themePreview((state.themeSel + 1) % THEMES.length);
+  else if (k === '\r' || k === ' ') themesConfirm();
+}
+
 // ---------------------------------------------------------------- displays (several monitors)
 function displayCfg(n) {
   if (n === 0) return state.cfg;
@@ -1793,6 +1833,7 @@ function onKey(k) {
   if (state.mode === 'install') return installKey(k);
   if (state.mode === 'wifi') return wifiKey(k);
   if (state.mode === 'displays') return displaysKey(k);
+  if (state.mode === 'themes') return themesKey(k);
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
@@ -1900,6 +1941,7 @@ function tick() {
   else if (state.mode === 'install') renderInstall(m, t);
   else if (state.mode === 'wifi') renderWifi(m, t);
   else if (state.mode === 'displays') renderDisplays(m, t);
+  else if (state.mode === 'themes') renderThemes(m, t);
   else if (state.mode === 'setup') renderSetup(m, t);
   else if (!state.lastOk && !state.error && !state.deps.length && t < 4000) renderSplash(m, t);
   else if (renderNativeBoard(t)) return;
@@ -1968,6 +2010,7 @@ async function main() {
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
     if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
+    if (args.includes('--themes')) { openThemes(); themePreview(Number(args[args.indexOf('--themes') + 1]) || 4); }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
     if (args.includes('--cursor')) { pointer.visible = true; pointer.last = Date.now(); pointer.x = screen.w * 0.42; pointer.y = screen.h * 0.47; }
     if (args.includes('--theme')) state.cfg.theme = args[args.indexOf('--theme') + 1];
