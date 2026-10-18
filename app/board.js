@@ -365,11 +365,20 @@ class Screen {
   }
   // native mode: copy an RGB canvas (vector theme) into the framebuffer format
   // convert=false: the frame still holds the converted canvas (only the cursor moved), skip the conversion
-  drawCanvas(cv, convert = true) {
+  // regions: [{x, y, w, h}] = only these rectangles changed (scrollers), convert just them
+  drawCanvas(cv, convert = true, regions = null) {
     const { frame, stride, bpp } = this;
     const bytes = bpp / 8, rgb = cv.rgb;
     if (!convert) { /* frame is current */ }
-    else if (bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0) {
+    else if (regions && bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0) {
+      const out = new Uint32Array(frame.buffer, frame.byteOffset, frame.length >> 2);
+      for (const r of regions) {
+        for (let y = Math.max(0, r.y); y < Math.min(this.h, r.y + r.h); y++) {
+          let p = y * this.w + r.x, i = p * 3;
+          for (let x = 0; x < r.w; x++, p++, i += 3) out[p] = 0xff000000 | (rgb[i] << 16) | (rgb[i + 1] << 8) | rgb[i + 2];
+        }
+      }
+    } else if (bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0) {
       // fast path: one 32-bit store per pixel (little endian: B G R A)
       const out = new Uint32Array(frame.buffer, frame.byteOffset, frame.length >> 2), n = this.w * this.h;
       for (let p = 0, i = 0; p < n; p++, i += 3) out[p] = 0xff000000 | (rgb[i] << 16) | (rgb[i + 1] << 8) | rgb[i + 2];
@@ -870,6 +879,33 @@ function layout(m) {
 
 // LCD themes with renderNative() draw at full resolution with anti-aliased TrueType text
 let nativeCanvas = null, lastNative = 0, lastCursorDraw = 0, nativeCost = 0;
+// Scrollers: a marquee that moves between theme frames. The theme registers it while rendering (api.scroller); the
+// text is rendered once into a strip and a small window of it is copied into the canvas and the screen every ~33 ms,
+// so scrolling stays smooth even when the whole theme can only be re-rendered a few times a second (VMs, 1080p).
+const scrollers = [];
+let lastScroll = 0;
+function scrollerPaint(cv, sc, now) {
+  vector.paintStrip(cv, sc.strip, sc.x, sc.y, sc.w, sc.h, ((now - sc.t0) / 1000) * sc.speed, sc.gap, sc.bg);
+}
+const scrollPhase = new Map(); // text -> start time, so the movement continues when the theme is re-rendered
+function scrollerRegister(cv, o) {
+  const strip = vector.makeStrip(o.text, o.font, o.size, o.color, o.bg, o.h, o.baseline);
+  const key = o.text.slice(0, 200) + '|' + Math.round(o.w);
+  if (!scrollPhase.has(key)) { if (scrollPhase.size > 20) scrollPhase.clear(); scrollPhase.set(key, Date.now()); }
+  const sc = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h), strip, speed: o.speed || 90, gap: o.gap || 120, bg: o.bg, t0: scrollPhase.get(key) };
+  if (strip.w <= sc.w) { scrollerPaint(cv, { ...sc, speed: 0 }, sc.t0); return; } // fits: static, nothing to animate
+  scrollers.push(sc);
+  scrollerPaint(cv, sc, sc.t0);
+}
+// called every ~33 ms: move the scrollers, convert only their rectangles, write only the changed rows
+function scrollTick() {
+  if (!scrollers.length || !nativeCanvas || !screen || state.mode !== 'board' || PNG_OUT) return;
+  if (state.cfg.custom?.disruptions !== false && disruptionSlot(Date.now() - t0)) return; // a notice is on screen
+  if (!ownVtActive()) return;
+  const now = Date.now();
+  for (const sc of scrollers) scrollerPaint(nativeCanvas, sc, now);
+  screen.drawCanvas(nativeCanvas, true, scrollers);
+}
 function renderNativeBoard(t) {
   const th = currentTheme();
   if (!vector || typeof th.renderNative !== 'function' || state.cfg.custom?.style === 'led') return false;
@@ -889,6 +925,7 @@ function renderNativeBoard(t) {
   lastNative = t1;
   pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
   if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
+  scrollers.length = 0;
   try {
     th.renderNative(nativeCanvas, t, themeApi);
     if (state.cfg.custom?.disruptions !== false) nativeDisruption(nativeCanvas, t, th);
@@ -1030,6 +1067,7 @@ const themeApi = {
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
   paging: () => state.cfg.custom?.paging !== false,
+  scroller: (cv, o) => scrollerRegister(cv, o), // marquee that keeps moving between theme frames (see scrollers)
   alertLines: () => state.alerts.map(fullAlertText), // stop notices with their details, for marquees
 };
 
@@ -2177,6 +2215,7 @@ async function main() {
   pointer.x = screen.w / 2; pointer.y = screen.h / 2;
   startMouse();
   setInterval(tick, 66);
+  setInterval(scrollTick, 33);
   setTimeout(updateLoop, 45000); // first check once the network is surely up
   if (__dirname === updater.UPDATE_DIR) setTimeout(() => updater.confirm(__dirname), 20000); // new version runs fine
 }

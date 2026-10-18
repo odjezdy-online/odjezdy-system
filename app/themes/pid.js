@@ -108,11 +108,7 @@ module.exports = {
     if (alerts.length) {
       const bx = pad, bw = W - pad - 300 * s - bx, bh = 80 * s, by = fy + (footerH - bh) / 2, text = alerts.join('   /   ');
       c.rect(bx, by, bw, bh, K.grey);
-      const tw = c.measure(text, F.reg, 48 * s) + 120 * s;
-      const off = tw > bw - bh ? (t / 1000 * 70 * s) % tw : 0;
-      c.text(text, bx + bh + 20 * s - off, by + bh * 0.72, { font: F.reg, size: 48 * s, color: K.bg });
-      if (tw > bw - bh) c.text(text, bx + bh + 20 * s - off + tw, by + bh * 0.72, { font: F.reg, size: 48 * s, color: K.bg });
-      // hazard-stripe block at the left end hides the text start; black rect hides the overflow at the right
+      // hazard-stripe block at the left end; the text scrolls smoothly to its right (api.scroller)
       c.rect(bx, by, bh + 20 * s, bh, K.grey);
       for (let yy = 0; yy < bh; yy++) { // diagonal orange stripes
         for (let k = -2; k < 8; k++) {
@@ -121,7 +117,8 @@ module.exports = {
         }
       }
       c.rect(bx + 20 * s + bh, by, 4 * s, bh, K.grey);
-      c.rect(bx + bw, by - 2, 320 * s, bh + 4, K.bg);
+      const wx = bx + bh + 24 * s;
+      api.scroller(c, { text, x: wx, y: by, w: bx + bw - wx, h: bh, baseline: bh * 0.72, font: F.reg, size: 48 * s, color: K.bg, bg: K.grey, speed: 80 * s, gap: 120 * s });
     } else {
       const wd = now.toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).toLowerCase();
       T(wd, pad, fy + footerH * 0.7, 65, K.white, { maxW: W - 2 * pad - 360 * s });

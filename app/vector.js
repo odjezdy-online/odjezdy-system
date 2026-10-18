@@ -232,7 +232,11 @@ class Canvas {
   }
   rect(x, y, w, h, col) {
     x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
-    for (let yy = Math.max(0, y); yy < Math.min(this.h, y + h); yy++) for (let xx = Math.max(0, x); xx < Math.min(this.w, x + w); xx++) this.blend(xx, yy, col, 255);
+    const x0 = Math.max(0, x), x1 = Math.min(this.w, x + w), rgb = this.rgb, r = col[0], g = col[1], b = col[2];
+    for (let yy = Math.max(0, y); yy < Math.min(this.h, y + h); yy++) { // opaque fill: straight stores, no per-pixel call
+      let o = (yy * this.w + x0) * 3;
+      for (let xx = x0; xx < x1; xx++) { rgb[o++] = r; rgb[o++] = g; rgb[o++] = b; }
+    }
   }
   // rounded rectangle with anti-aliased corners (r = radius in px)
   roundRect(x, y, w, h, r, col) {
@@ -330,4 +334,33 @@ class Canvas {
   }
 }
 
-module.exports = { Canvas, findFont, available: () => !!opentype };
+// One line of text rendered once into an offscreen strip (for scrollers that move it without re-rendering the theme)
+const stripCache = new Map();
+function makeStrip(text, font, size, color, bg, h, baseline) {
+  const key = [text, font, Math.round(size), color.join(), bg.join(), h, baseline].join('|');
+  let st = stripCache.get(key);
+  if (st) return st;
+  const cv = new Canvas(Math.max(1, Math.ceil(new Canvas(1, 1).measure(text, font, size)) + 4), Math.max(1, Math.ceil(h)));
+  cv.clear(bg);
+  cv.text(text, 0, baseline, { font, size, color });
+  st = { w: cv.w, h: cv.h, rgb: cv.rgb };
+  stripCache.set(key, st);
+  if (stripCache.size > 20) stripCache.delete(stripCache.keys().next().value);
+  return st;
+}
+// copy a window of the looping strip (offset in px, gap between repeats) into the canvas at x,y of size w x h
+function paintStrip(cv, strip, x, y, w, h, offset, gap, bg) {
+  const total = strip.w + gap, off = ((Math.floor(offset) % total) + total) % total;
+  for (let r = 0; r < Math.min(h, strip.h); r++) {
+    const dy = y + r;
+    if (dy < 0 || dy >= cv.h) continue;
+    let o = (dy * cv.w + x) * 3;
+    for (let i = 0; i < w; i++, o += 3) {
+      const sx = (i + off) % total;
+      if (sx < strip.w) { const q = (r * strip.w + sx) * 3; cv.rgb[o] = strip.rgb[q]; cv.rgb[o + 1] = strip.rgb[q + 1]; cv.rgb[o + 2] = strip.rgb[q + 2]; }
+      else { cv.rgb[o] = bg[0]; cv.rgb[o + 1] = bg[1]; cv.rgb[o + 2] = bg[2]; }
+    }
+  }
+}
+
+module.exports = { Canvas, makeStrip, paintStrip, findFont, available: () => !!opentype };

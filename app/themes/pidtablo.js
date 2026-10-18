@@ -128,11 +128,9 @@ module.exports = {
     if (alerts.length) {
       const by = H - infoH;
       c.rect(0, by, W, infoH, K.orange);
-      const text = alerts.join('     ·     '), tx0 = 130 * s, tw = c.measure(text, F.bold, 58 * s) + 160 * s;
-      const off = tw > W - tx0 ? ((t / 1000) * 120 * s) % tw : 0;
-      c.text(text, tx0 - off, by + 66 * s, { font: F.bold, size: 58 * s, color: K.black });
-      if (tw > W - tx0) c.text(text, tx0 - off + tw, by + 66 * s, { font: F.bold, size: 58 * s, color: K.black });
-      c.rect(0, by, tx0 - 8 * s, infoH, K.orange); // "!" block hides the text start
+      const text = alerts.join('     ·     '), tx0 = 130 * s;
+      // the text moves smoothly between theme frames (api.scroller), the "!" block is static
+      api.scroller(c, { text, x: tx0, y: by, w: W - tx0, h: infoH, baseline: 66 * s, font: F.bold, size: 58 * s, color: K.black, bg: K.orange, speed: 130 * s, gap: 160 * s });
       T('!', 50 * s, by + 72 * s, 80, K.black, { font: F.bold, align: 'center' });
     }
     if (pages > 1) T(`${pg + 1} / ${pages}`, W / 2 - 40 * s, colY + 34 * s, 24, K.white, { align: 'center' }); // not in the original: only so paging is visible
