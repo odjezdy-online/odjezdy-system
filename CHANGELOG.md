@@ -2,6 +2,11 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.1
+- Mimořádnosti se už neusekávají: běžící text i oznámení ukážou celý text hlášení
+- Oznámení má shrnutí, podrobnosti a dobu platnosti („Platí od … do …“)
+- Krátká shrnutí hlášení zpracovaná serverem (ne zkrácený nadpis zdroje)
+
 ## 0.5.0
 - 9 nových vzhledů: ČD hala a ČD klapky, Wiener Linien, MTA, SL, PID, letištní tabule, Teletext, Brutal
 - Výběr vzhledu ze seznamu s náhledem
