@@ -993,9 +993,9 @@ function renderNativeBoard(t) {
   perf.frames++; perf.render += t2 - t1; perf.convert += t3 - t2 - writeMs;
   nativeCost = nativeCost * 0.7 + (t3 - t1) * 0.3; // render + convert + write to the screen
   // auto quality: a few slow frames in a row while the time goes into rendering/conversion (not into writing,
-  // which a smaller canvas does not speed up) -> render smaller
+  // which a smaller canvas does not speed up) -> render smaller; at most half size (1/3 only by the setting)
   if (qs === 'auto') {
-    if (t3 - t1 > 160 && writeMs < (t3 - t1) * 0.6 && qualityFactor < 3) { if (++slowFrames >= 3) { qualityFactor++; slowFrames = 0; nativeCanvas = null; nativeCost = 0; log(`quality: frames too slow (${t3 - t1} ms), rendering at 1/${qualityFactor}`); } }
+    if (t3 - t1 > 160 && writeMs < (t3 - t1) * 0.45 && qualityFactor < 2) { if (++slowFrames >= 3) { qualityFactor++; slowFrames = 0; nativeCanvas = null; nativeCost = 0; log(`quality: frames too slow (${t3 - t1} ms), rendering at 1/${qualityFactor}`); } }
     else slowFrames = 0;
   }
   return true;
