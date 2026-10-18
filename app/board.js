@@ -937,7 +937,7 @@ function scrollerRegister(cv, o) {
   const sc = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h), strip, speed: o.speed || 90, gap: o.gap || 120, bg: o.bg, t0: scrollPhase.get(key) };
   if (strip.w <= sc.w) { scrollerPaint(cv, { ...sc, speed: 0 }, sc.t0); return; } // fits: static, nothing to animate
   scrollers.push(sc);
-  scrollerPaint(cv, sc, sc.t0);
+  scrollerPaint(cv, sc, Date.now()); // paint where the text is NOW (painting at the start made it jump back at every theme re-render)
 }
 // called every ~33 ms: move the scrollers, convert only their rectangles, write only the changed rows
 function scrollTick() {
