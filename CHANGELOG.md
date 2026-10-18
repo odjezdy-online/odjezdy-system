@@ -2,10 +2,11 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
-## Nevydáno
+## 0.5.2
 - Vzhled PID přepsán podle skutečného virtuálního tabla PID (ikony vozíčku a klimatizace, ikony metra, logo)
 - Nový vzhled PID tablo (LCD zastávkové tablo)
 - U dat PID se uvádí zdroj „PID (Golemio)“, oznámení PID (infotexts) se ukazují v pruhu hlášení
+- Písmo Prague Citizen se použije, když je nainstalované, jinak Fira Sans
 
 ## 0.5.1
 - Mimořádnosti se už neusekávají: běžící text i oznámení ukážou celý text hlášení
