@@ -2,6 +2,13 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.6
+- Zpožděné spoje zůstávají na tabuli až do skutečného odjezdu, ne jen do plánovaného času
+- Běžící text pokračuje i při zobrazené mimořádnosti, celá tabule se nesekne
+- Běžící text v LED vzhledech se posouvá rovnoměrně o jeden bod
+- Automatická kvalita obrazu se po zlepšení výkonu vrací na plnou
+- Opraven fialový blok v běžícím pruhu a přetékání textu oznámení
+
 ## 0.5.5
 - Opraveno skákání běžícího textu zpět na začátek při překreslení vzhledu
 - Tabule už nezapisuje celý snímek každé 2 s (škubnutí ve virtuálních počítačích)
