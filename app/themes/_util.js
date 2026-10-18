@@ -1,10 +1,15 @@
 // Shared helpers for themes (files starting with "_" are not loaded as themes).
 
 // Split items into pages of `per` and pick the one to show now (rotates every `ms`).
+// Setting "Stránkování": paging === false shows only the first page and never rotates (board.js sets it).
+let paging = true;
+const setPaging = (on) => { paging = on !== false; };
+const pageAt = (t, ms, pages) => (paging ? Math.floor(t / ms) % pages : 0);
+const pageCount = (pages) => (paging ? pages : 1);
 function paginate(items, per, t, ms = 8000) {
   per = Math.max(1, per);
-  const pages = Math.max(1, Math.ceil(items.length / per));
-  const page = Math.floor(t / ms) % pages;
+  const pages = pageCount(Math.max(1, Math.ceil(items.length / per)));
+  const page = pageAt(t, ms, pages);
   return { items: items.slice(page * per, page * per + per), page, pages };
 }
 
@@ -68,4 +73,4 @@ function countdown(api, d, now = 'teď') {
   return m < 60 ? `${m} min` : api.hhmm(new Date(api.depTime(d)));
 }
 
-module.exports = { paginate, box, badge, emptyMessage, clockText, marquee, boardKind, isRail, countdown };
+module.exports = { setPaging, pageAt, pageCount, paginate, box, badge, emptyMessage, clockText, marquee, boardKind, isRail, countdown };

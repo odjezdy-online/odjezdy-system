@@ -72,6 +72,7 @@ module.exports = {
     const cycle = pageMs.reduce((a, x) => a + x, 0) || 1;
     let pi = 0, pageT = t % cycle;
     while (pi < pages.length - 1 && pageT >= pageMs[pi]) { pageT -= pageMs[pi]; pi++; }
+    if (!api.paging()) { pages.length = Math.min(pages.length, 1); pi = 0; pageT = t % 60000; } // setting: one fixed page
     if (pages.length > 1) {
       const label = `${pi + 1}/${pages.length}`;
       m.textRight(label, colIn - textWidth('Odjezd', 'small') - 8, L.colHead, 'small', C.DIM);

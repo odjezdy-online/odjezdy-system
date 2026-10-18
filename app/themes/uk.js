@@ -1,7 +1,7 @@
 // UK National Rail style: amber dot-matrix (Infotec "menu" boards).
 // "1st 19:42 Destination ... On time", scrolling "Calling at" line under the first train,
 // following trains below, big clock bottom centre.
-const { paginate, emptyMessage, clockText, marquee, boardKind } = require('./_util');
+const { paginate, emptyMessage, clockText, marquee, boardKind, pageAt, pageCount } = require('./_util');
 
 // London "Countdown" bus-stop sign: "1  Edgware   2 min", stop name on top, "due" when arriving.
 function countdownBoard(m, t, api, deps, clockY) {
@@ -126,7 +126,7 @@ function nativeUK(c, t, api) {
     // London "Countdown": stop name, then "line  destination   N min"
     T(stopLabel(state.cfg.stop), x0, 64 * s, 50);
     const rowH = 66 * s, per = Math.max(1, Math.floor((c.h - 130 * s - 110 * s) / rowH));
-    const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per)), pg = Math.floor(t / 6000) % pages;
+    const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per))), pg = pageAt(t, 6000, pages);
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y = 140 * s + i * rowH;
       const mins = minutesTo(d);
@@ -161,7 +161,7 @@ function nativeUK(c, t, api) {
   }
   const rowH = 64 * s, top = 200 * s, per = Math.max(1, Math.floor((c.h - top - 120 * s) / rowH));
   const rest = deps.slice(1, 12).map((d, i) => ({ d, i: i + 1 }));
-  const pages = Math.max(1, Math.ceil(rest.length / per)), pg = Math.floor(t / 6000) % pages;
+  const pages = pageCount(Math.max(1, Math.ceil(rest.length / per))), pg = pageAt(t, 6000, pages);
   rest.slice(pg * per, pg * per + per).forEach(({ d, i }, k) => row(d, i, top + k * rowH, 46));
   if (pages > 1) T(`${pg + 1}/${pages}`, x1, c.h - 30 * s, 30, DIMA, { align: 'right' });
   c.dotScreen(Math.max(2, Math.floor(W / 420)));

@@ -1,6 +1,7 @@
 // E-ink (fictional): a calm paper display like the solar-powered e-paper signs at rural stops. Warm off-white,
 // black text, thin rules, no seconds and no animation; the page turns only every 15 s.
 const { simpleLed } = require('./_simple');
+const { pageAt, pageCount } = require('./_util');
 
 const E = { paper: [236, 233, 222], ink: [28, 28, 30], grey: [112, 110, 104], rule: [196, 192, 180], red: [170, 30, 20] };
 const F = { reg: 'Lato-Regular', bold: 'Lato-Bold' };
@@ -28,7 +29,7 @@ module.exports = {
       return;
     }
     const top = 116 * s, rowH = 80 * s, per = Math.max(1, Math.floor((c.h - top - 36 * s) / rowH));
-    const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per)), pg = Math.floor(t / 15000) % pages;
+    const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per))), pg = pageAt(t, 15000, pages);
     const colDest = x0 + 120 * s, timeW = 190 * s;
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y = top + i * rowH, mins = minutesTo(d);

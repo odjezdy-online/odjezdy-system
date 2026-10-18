@@ -14,6 +14,7 @@ const zlib = require('zlib');
 const os = require('os');
 const updater = require('./updater');
 const system = require('./system');
+const themeUtil = require('./themes/_util');
 const displays = require('./displays');
 
 // An accepted update lives in /var/lib/odjezdy/app; if it is newer than this copy, run that one instead.
@@ -363,15 +364,23 @@ class Screen {
     if (under) { under.data.copy(frame, 0, 0, 0); this.restoreCursor(under, bytes); }
   }
   // native mode: copy an RGB canvas (vector theme) into the framebuffer format
-  drawCanvas(cv) {
+  // convert=false: the frame still holds the converted canvas (only the cursor moved), skip the conversion
+  drawCanvas(cv, convert = true) {
     const { frame, stride, bpp } = this;
     const bytes = bpp / 8, rgb = cv.rgb;
-    for (let y = 0; y < this.h; y++) {
-      let o = y * stride, i = y * this.w * 3;
-      for (let x = 0; x < this.w; x++, o += bytes, i += 3) {
-        if (bytes === 4) { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; frame[o + 3] = 255; }
-        else if (bytes === 2) frame.writeUInt16LE(((rgb[i] >> 3) << 11) | ((rgb[i + 1] >> 2) << 5) | (rgb[i + 2] >> 3), o);
-        else { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; }
+    if (!convert) { /* frame is current */ }
+    else if (bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0) {
+      // fast path: one 32-bit store per pixel (little endian: B G R A)
+      const out = new Uint32Array(frame.buffer, frame.byteOffset, frame.length >> 2), n = this.w * this.h;
+      for (let p = 0, i = 0; p < n; p++, i += 3) out[p] = 0xff000000 | (rgb[i] << 16) | (rgb[i + 1] << 8) | rgb[i + 2];
+    } else {
+      for (let y = 0; y < this.h; y++) {
+        let o = y * stride, i = y * this.w * 3;
+        for (let x = 0; x < this.w; x++, o += bytes, i += 3) {
+          if (bytes === 4) { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; frame[o + 3] = 255; }
+          else if (bytes === 2) frame.writeUInt16LE(((rgb[i] >> 3) << 11) | ((rgb[i + 1] >> 2) << 5) | (rgb[i + 2] >> 3), o);
+          else { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; }
+        }
       }
     }
     this.prev = null; // the LED path must repaint everything next time
@@ -687,7 +696,8 @@ async function refreshBoard() {
     // richer fields from the odjezdy.online rewrite backend (absent on the old API -> no change)
     if (d.terminatesHere) continue; // the train ends here: an arrival, not a departure
     if (d.trainNumber && !d.train) d.train = `${d.category || d.line || ''} ${d.trainNumber}`.trim();
-    if (d.destinationConfident === false) d.destination = ''; // "Neznámá stanice" placeholder: better blank
+    // "Neznámá stanice" from the server is a placeholder, not a destination (LE trains, some RJ): say so plainly
+    if (d.destinationConfident === false || /^Neznámá stanice$/i.test(d.destination || '')) { d.destination = 'cíl neuveden'; d.noDest = true; }
     d.via = Array.isArray(d.viaStops) ? d.viaStops : [];
     // the same train often comes from several sources at a station (ČD + DÚK + PID): one row per train
     // number and minute, keeping the copy that knows more (destination, platform, delay)
@@ -812,21 +822,24 @@ function layout(m) {
 }
 
 // LCD themes with renderNative() draw at full resolution with anti-aliased TrueType text
-let nativeCanvas = null, lastNative = 0;
+let nativeCanvas = null, lastNative = 0, lastCursorDraw = 0, nativeCost = 0;
 function renderNativeBoard(t) {
   const th = currentTheme();
   if (!vector || typeof th.renderNative !== 'function' || state.cfg.custom?.style === 'led') return false;
   if (state.cfg.custom?.font && state.cfg.custom.font !== 'theme') return false; // user forced an LED font
-  // 5 fps is plenty for a static board (clock seconds, marquee); the cursor still moves at tick rate
-  if (Date.now() - lastNative < 180) {
-    // between theme frames only the cursor moves: reuse the last canvas instead of re-rendering the theme
-    if (nativeCanvas && pointer.visible && (pointer.x !== pointer.drawnX || pointer.y !== pointer.drawnY)) {
-      pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
-      screen.drawCanvas(nativeCanvas);
+  // Theme frames at ~5 fps (clock seconds, marquee), slower when a frame is expensive (emulated GPUs in VMs,
+  // slow CPUs): the interval follows 4x the measured cost, at most 1 fps. Between theme frames only the cursor
+  // moves: the last canvas is reused, no re-render and no re-conversion.
+  const gap = Math.min(1000, Math.max(180, nativeCost * 4));
+  if (Date.now() - lastNative < gap) {
+    if (nativeCanvas && pointer.visible && (pointer.x !== pointer.drawnX || pointer.y !== pointer.drawnY) && Date.now() - lastCursorDraw > 30) {
+      pointer.drawnX = pointer.x; pointer.drawnY = pointer.y; lastCursorDraw = Date.now();
+      screen.drawCanvas(nativeCanvas, false);
     }
     return true;
   }
-  lastNative = Date.now();
+  const t1 = Date.now();
+  lastNative = t1;
   pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
   if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
   try {
@@ -839,6 +852,7 @@ function renderNativeBoard(t) {
     }
   } catch (e) { log('native render: ' + e.stack); return false; }
   screen.drawCanvas(nativeCanvas);
+  nativeCost = nativeCost * 0.7 + (Date.now() - t1) * 0.3; // render + convert + write to the screen
   return true;
 }
 function nativeDisruption(c, t, th) {
@@ -947,6 +961,7 @@ const themeApi = {
   vector: () => vector,
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,
+  paging: () => state.cfg.custom?.paging !== false,
 };
 
 function cycleTheme(step = 1) {
@@ -1167,6 +1182,7 @@ const SETTINGS = [
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, 5, false], show: (v) => (v === false ? 'vypnutá' : v === 5 ? 'každých 5 min' : 'každé 2 min') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
+  { key: 'paging', label: 'Stránkování', values: () => [true, false], show: (v) => (v === false ? 'jen první stránka' : 'střídat stránky') },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, 'always', false], show: (v) => (v === false ? 'vypnutý' : v === 'always' ? 'vždy viditelný' : 'při pohybu myši') },
 ];
 function settingValue(it) {
@@ -1853,6 +1869,7 @@ function tick() {
   const t = Date.now() - t0;
   m.clear();
   hits.length = 0;
+  themeUtil.setPaging(state.cfg.custom?.paging);
   const userFont = state.cfg.custom?.font;
   faceFamily = userFont && userFont !== 'theme' ? (userFont === 'buse' ? null : userFont) : currentTheme().fonts || null;
   if (pointer.visible && state.cfg.custom?.cursor !== 'always' && Date.now() - pointer.last > 5000) pointer.visible = false;

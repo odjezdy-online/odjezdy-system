@@ -1,6 +1,7 @@
 // Neon (fictional): a night-city sign board. Dark violet background with a faint perspective grid, glowing
 // cyan / magenta tube lettering (soft halo drawn as faded copies around the text), line numbers in neon frames.
 const { simpleLed } = require('./_simple');
+const { pageAt, pageCount } = require('./_util');
 
 const N = { bg: [10, 6, 24], grid: [40, 16, 70], cyan: [80, 240, 255], pink: [255, 70, 200], white: [240, 236, 255], dim: [130, 110, 180], warn: [255, 220, 80] };
 const F = { bold: 'BarlowCondensed-SemiBold', med: 'BarlowCondensed-Medium' };
@@ -48,7 +49,7 @@ module.exports = {
       return;
     }
     const top = 124 * s, rowH = 84 * s, per = Math.max(1, Math.floor((H - top - 40 * s) / rowH));
-    const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)), pg = Math.floor(t / 8000) % pages;
+    const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per))), pg = pageAt(t, 8000, pages);
     const boxW = 110 * s, colDest = x0 + boxW + 28 * s, timeW = 170 * s;
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y = top + i * rowH;

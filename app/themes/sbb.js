@@ -1,7 +1,7 @@
 // SBB (Switzerland) style: corporate blue screen, white text, line in a white badge,
 // delay in red "+5'", platform ("Gleis/Kante") on the right. Header "Abfahrt  Départ  Partenza".
 // Station (rail): clock time + Gleis. City stop (urban): waiting time in minutes ("3'") like SBB/VBZ stop displays.
-const { paginate, badge, emptyMessage, clockText, marquee, boardKind } = require('./_util');
+const { paginate, badge, emptyMessage, clockText, marquee, boardKind, pageAt, pageCount } = require('./_util');
 
 const SBB_BLUE = [45, 50, 125];
 
@@ -94,7 +94,7 @@ function nativeSBB(c, t, api) {
   const urban = deps.slice(0, 20).filter((d) => d.type === 'train' || d.type === 'rail').length < Math.min(deps.length, 20) / 2;
   const top = 130 * s, rowH = 94 * s;
   const per = Math.max(1, Math.floor((c.h - top - 30 * s) / rowH));
-  const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)), pg = Math.floor(t / 7000) % pages;
+  const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per))), pg = pageAt(t, 7000, pages);
   const badgeW = 118 * s, colTime = x0 + badgeW + 24 * s, colDest = colTime + 120 * s, platW = 110 * s;
   deps.slice(pg * per, pg * per + per).forEach((d, i) => {
     const y = top + i * rowH;
@@ -110,7 +110,7 @@ function nativeSBB(c, t, api) {
     if (!urban && d.delayMinutes > 0) c.text(`+${d.delayMinutes}'`, colTime, y + 78 * s, { font: FS.bold, size: 22 * s, color: SB.red });
     c.text(d.cancelled ? `${d.destination} — fällt aus` : d.destination, colDest, y + 48 * s, { font: FS.bold, size: 34 * s, color: d.cancelled ? SB.red : SB.white, maxW: x1 - colDest - platW - 20 * s });
     const n = depNotice(d);
-    const sub = n ? n.text : d.via?.length ? d.via.slice(0, 4).join(' · ') : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || ''); // no operator (ČD/DÚK/PID): it tells passengers nothing
+    const sub = n ? n.text : [d.via?.length ? d.via.slice(0, 4).join(' · ') : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || ''), d.provider].filter(Boolean).join(' · ');
     c.text(sub, colDest, y + 78 * s, { font: n ? FS.bold : FS.reg, size: 20 * s, color: n ? SB.red : SB.dim, maxW: x1 - colDest - platW - 20 * s });
     const plat = platformOf(d);
     if (plat) {

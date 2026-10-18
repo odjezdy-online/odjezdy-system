@@ -2,7 +2,7 @@
 // Two layouts like the real thing:
 //   rail  (station):  like bahnhof.de "Abfahrt": train badge + time (+ new time in a white box) | Über/Ziel | Gleis
 //   urban (city stop): Linie | Ziel | Abfahrt (in min, "sofort")
-const { paginate, box, badge, emptyMessage, clockText, marquee, boardKind, isRail, countdown } = require('./_util');
+const { paginate, box, badge, emptyMessage, clockText, marquee, boardKind, isRail, countdown, pageAt, pageCount } = require('./_util');
 
 const BLUE = [10, 32, 92];
 
@@ -77,7 +77,7 @@ function railBoard(m, t, api, deps, hy) {
     }
     // small line above the destination: disruption first, otherwise operator / line
     const n = depNotice(d);
-    const over = n ? n.text : d.via?.length ? d.via.slice(0, 4).join(' · ') : ''; // Über = via; no stops -> empty, not the operator
+    const over = n ? n.text : [d.via?.length ? d.via.slice(0, 4).join(' · ') : '', d.provider].filter(Boolean).join(' · ');
     if (over) marquee(m, api, over, colMid, midEnd, y + 1, 'small', n ? C.YELLOW : C.DIM, t);
     const dest = d.cancelled ? `${d.destination}  · fällt aus` : d.destination || '';
     m.text(fitText(dest, 'normal', midEnd - colMid), colMid, yTime, 'normal', d.cancelled ? C.RED : C.AMBER);
@@ -185,8 +185,8 @@ function nativeRender(c, t, api) {
 
   const top = lineY + 16 * s, rowH = (rail ? 96 : 70) * s;
   const per = Math.max(1, Math.floor((c.h - top - 30 * s) / rowH));
-  const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per));
-  const page = Math.floor(t / 8000) % pages;
+  const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)));
+  const page = pageAt(t, 8000, pages);
   if (pages > 1) c.text(`${page + 1}/${pages}`, midEnd, hy + 20 * s, { font: F.semi, size: 15 * s, color: N.dim, align: 'right' });
 
   deps.slice(page * per, page * per + per).forEach((d, i) => {
@@ -209,7 +209,7 @@ function nativeRender(c, t, api) {
       }
       c.text(planned, tx, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, align: 'right' });
       // "über" line, destination, platform
-      const over = n ? n.text : d.via?.length ? d.via.slice(0, 5).join(' – ') : ''; // Über = via; no stops -> empty, not the operator
+      const over = n ? n.text : [d.via?.length ? d.via.slice(0, 5).join(' – ') : '', d.provider].filter(Boolean).join(' – ');
       c.text(over, colM, y + 30 * s, { font: n ? F.semi : F.reg, size: 16 * s, color: n ? N.yellow : N.dim, maxW: midEnd - colM });
       c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 10 * s });
       const plat = platformOf(d);

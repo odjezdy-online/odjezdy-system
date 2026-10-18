@@ -1,6 +1,7 @@
 // NS (Netherlands) style: deep blue screen, yellow "Vertrek" band, white text, platform number in a white
 // square, delays as "+5" in orange-red next to the time. Fira Sans (OFL) as a stand-in for NS Sans.
 const { simpleLed } = require('./_simple');
+const { pageAt, pageCount } = require('./_util');
 
 const N = { blue: [0, 48, 130], band: [255, 201, 23], white: [255, 255, 255], dim: [160, 186, 230], red: [255, 96, 64], line: [40, 84, 160] };
 const F = { reg: 'FiraSans-Regular', semi: 'FiraSans-SemiBold', bold: 'FiraSans-Bold' };
@@ -34,7 +35,7 @@ module.exports = {
       return;
     }
     const top = 146 * s, rowH = 88 * s, per = Math.max(1, Math.floor((c.h - top - 34 * s) / rowH));
-    const pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)), pg = Math.floor(t / 8000) % pages;
+    const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per))), pg = pageAt(t, 8000, pages);
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y = top + i * rowH;
       c.hline(x0, x1, y, N.line, Math.max(1, 2 * s));

@@ -2,6 +2,7 @@
 // on its own flap tile with a split line; on each page change the tiles flip through random letters and
 // settle column by column, like the real mechanics.
 const { simpleLed } = require('./_simple');
+const { pageAt, pageCount } = require('./_util');
 
 const S = { bg: [16, 16, 18], tile: [40, 40, 44], tileHi: [52, 52, 57], split: [10, 10, 12], white: [240, 240, 232], yellow: [255, 206, 60], dim: [130, 130, 136], red: [255, 90, 70] };
 const FONT = 'BarlowCondensed-SemiBold';
@@ -54,7 +55,7 @@ module.exports = {
       return;
     }
     const per = Math.max(1, Math.floor((c.h - first - 40 * s) / rowH));
-    const PAGE = 10000, pages = Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per)), pg = Math.floor(t / PAGE) % pages;
+    const PAGE = 10000, pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 3) / per))), pg = pageAt(t, PAGE, pages);
     const flipT = t % PAGE; // ms since this page appeared
     deps.slice(pg * per, pg * per + per).forEach((d, i) => {
       const y = first + i * rowH, mins = minutesTo(d), late = d.delayMinutes >= 5 || d.cancelled;
