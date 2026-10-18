@@ -1526,7 +1526,7 @@ function installNext(dir = 1) {
 }
 function installStart() {
   const st = state.inst, c = st.choice;
-  st.step = 'progress'; st.ev = { stage: 'partition', progress: 0, message: 'Začínám…' };
+  st.step = 'progress'; st.ev = { stage: 'partition', progress: 0, message: 'Začínám…' }; st.t0 = Date.now();
   log(`install to ${c.disk} (${c.locale}, ${c.keymap}, ${c.timezone}, ${c.hostname})`);
   // random root password for the service console, shown once at the end. Letters only, without y/z (swapped
   // on QWERTZ) and look-alikes, so it types the same on any of the offered layouts. No SSH is installed.
@@ -1535,6 +1535,21 @@ function installStart() {
   system.installer.run(c.disk, (ev) => { st.ev = ev; }, ['--locale', c.locale, '--keymap', c.keymap, '--timezone', c.timezone, '--hostname', c.hostname, '--root-password', st.rootPass])
     .then(() => { st.step = 'done'; st.until = Date.now() + 120000; log('install done'); })
     .catch((e) => { st.step = 'error'; st.err = e.message; log('install failed: ' + e.message); });
+}
+// last lines of /var/log/odjezdy-install.log (raw output of pacstrap, grub …), re-read once a second
+let logTail = { at: 0, lines: [] };
+function installLogTail(n) {
+  if (Date.now() - logTail.at > 1000) {
+    logTail.at = Date.now();
+    try {
+      const f = process.env.ODJEZDY_INSTALL_LOG || '/var/log/odjezdy-install.log', fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size;
+      const buf = Buffer.alloc(Math.min(size, 6000));
+      fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+      fs.closeSync(fd);
+      logTail.lines = buf.toString('utf8').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/[\r\n]+/).map((l) => l.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    } catch { logTail.lines = []; }
+  }
+  return logTail.lines.slice(-n);
 }
 function bar(m, x0, y, w, h, frac, c) {
   m.hline(x0, x0 + w - 1, y, C.DIM); m.hline(x0, x0 + w - 1, y + h - 1, C.DIM);
@@ -1601,7 +1616,24 @@ function renderInstall(m, t) {
     bar(m, 2, y, W - 4, 12, ev.progress || 0, C.AMBER);
     y += 18;
     if (ev.message) m.text(fitText(ev.message, 'small', W - 4), 2, y, 'small', C.DIM);
-    hint('Nevypínej počítač. Podrobnosti: /var/log/odjezdy-install.log');
+    y += L.sm + 8;
+    // checklist of the stages, like a normal installer, plus elapsed time
+    const order = ['partition', 'format', 'pacstrap', 'bootloader', 'config'];
+    const cur = Math.max(0, order.indexOf(ev.stage));
+    order.forEach((sg, i) => {
+      const yy = y + i * (L.sm + 3), done = i < cur, now = i === cur;
+      m.text(done ? '+' : now ? '>' : '-', 2, yy, 'small', done ? C.GREEN : now ? C.WHITE : C.DIM);
+      m.text(STAGES[sg], 10, yy, 'small', done ? C.GREEN : now ? C.WHITE : C.DIM);
+    });
+    const secs = Math.floor((Date.now() - (st.t0 || Date.now())) / 1000);
+    m.textRight(`Uplynulo ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, W - 2, y, 'small', C.DIM);
+    if (ev.stage === 'pacstrap' && secs > 45 && (ev.progress || 0) < 0.2) m.textRight('Stahování závisí na rychlosti internetu', W - 2, y + L.sm + 3, 'small', C.DIM);
+    y += order.length * (L.sm + 3) + 6;
+    // the last lines of the real install log: what is happening right now
+    m.hline(0, W - 1, y - 2, C.DIM);
+    const room = Math.max(0, Math.floor((m.rows - L.sm - 4 - y) / (L.sm + 1)));
+    for (const [k, l] of installLogTail(room).entries()) m.text(fitText(l, 'small', W - 4), 2, y + k * (L.sm + 1), 'small', C.DIM);
+    hint('Nevypínej počítač. Celý log: /var/log/odjezdy-install.log');
   } else if (st.step === 'done') {
     m.text('Hotovo, Odjezdy OS je nainstalovaný.', 2, y, 'normal', C.GREEN);
     y += L.rowH + 4;
@@ -1620,9 +1652,15 @@ function renderInstall(m, t) {
   } else { // error
     m.text('Instalace se nepovedla', 2, y, 'normal', C.RED);
     y += L.rowH + 2;
-    for (const l of wrapText(st.err || '', 'small', W - 4, 4)) { m.text(l, 2, y, 'small', C.AMBER); y += L.sm + 2; }
-    m.text('Podrobnosti: /var/log/odjezdy-install.log', 2, y + 4, 'small', C.DIM);
-    hint('Enter = zkusit znovu · Esc = zpět');
+    for (const l of wrapText(st.err || '', 'small', W - 4, 3)) { m.text(l, 2, y, 'small', C.AMBER); y += L.sm + 2; }
+    // what the installer printed last: the actual reason is usually right here (and not readable otherwise)
+    y += 4;
+    m.text('Poslední řádky logu:', 2, y, 'small', C.DIM);
+    y += L.sm + 3;
+    logTail.at = 0; // fresh read
+    const room = Math.max(0, Math.floor((m.rows - L.sm - 4 - y) / (L.sm + 1)));
+    for (const [k, l] of installLogTail(room).entries()) m.text(fitText(l, 'small', W - 4), 2, y + k * (L.sm + 1), 'small', C.WHITE);
+    hint('Enter = zkusit znovu · Esc = zpět · celý log: /var/log/odjezdy-install.log (Alt+F2)');
   }
 }
 function installKey(k) {
@@ -2008,7 +2046,7 @@ async function main() {
     }
     if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
-    if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
+    if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.t0 = Date.now() - 83000; state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
     if (args.includes('--themes')) { openThemes(); themePreview(Number(args[args.indexOf('--themes') + 1]) || 4); }
     if (args.includes('--settings')) { state.mode = 'settings'; state.setSel = 1; }
