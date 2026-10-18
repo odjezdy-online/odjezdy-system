@@ -45,6 +45,8 @@ Vzhled se přepíná klávesou **T** nebo v úvodním menu. Většina vzhledů s
 | `fids` | FIDS · letištní tabule | [PNG](docs/theme-fids.png) |
 | `teletext` | Teletext · P100 | [PNG](docs/theme-teletext.png) |
 | `brutal` | Brutal · fiktivní | [PNG](docs/theme-brutal.png) |
+| `cdhala` | ČD hala · LED tabule v nádražní hale (zelená/oranžová/červená podle druhu vlaku) | [PNG](docs/theme-cdhala.png) |
+| `cdklapky` | ČD klapky · klasická překlápěcí tabule Odjezd / Departure / Abfahrt | [PNG](docs/theme-cdklapky.png) |
 
 Při mimořádnosti (výluka zastávky, zrušený spoj) se přes jakýkoli vzhled pravidelně ukáže celoobrazovkové oznámení **Mimořádnost**. V nastavení jde vypnout.
 

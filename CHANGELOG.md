@@ -1,6 +1,11 @@
 # Změny
 
 ## Nevydáno
+- Nové vzhledy ČD hala (LED tabule) a ČD klapky (překlápěcí tabule) podle skutečných nádražních tabulí
+- Dopravce je v DB a SBB vzhledu zvlášť, ne za zastávkami „přes“
+- Výběr vzhledu ze seznamu s náhledem
+- Instalace: přehled kroků, průběžný log a spolehlivější ukazatel
+- Oprava: pozdní odpověď pro předchozí zastávku už nepřepíše novou tabuli
 
 - `wiener`: Wiener Linien · Vídeň; nový motiv s LED fallbackem, stránkováním a náhledem.
 - `mta`: MTA Countdown · New York; nový motiv s LED fallbackem, stránkováním a náhledem.
