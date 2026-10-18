@@ -182,7 +182,13 @@ fail() {
   fi
   exit 1
 }
-on_err() { local code=$?; trap - ERR; fail "Příkaz selhal (kód $code) na řádku $1. Podrobnosti: $LOG"; }
+on_err() {
+  local code=$? cmd=$BASH_COMMAND last=""
+  trap - ERR
+  # the failing command and the last lines it printed (stderr goes to the log in JSON mode)
+  [ -f "$LOG" ] && last=$(tail -n 3 "$LOG" | tr '\n' ' ' | cut -c1-300)
+  fail "${cmd} (kód ${code}, řádek $1): ${last} [log: $LOG]"
+}
 trap 'on_err $LINENO' ERR
 
 # --- choosing and checking the disk ---------------------------------------
@@ -318,7 +324,15 @@ sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet logle
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 
 sync
-umount -R /mnt
+# pacman-key leaves a gpg-agent running inside /mnt (it keeps the mount busy: umount exit 32), so stop
+# it first; whatever still sits on the target is cleared, and a stubborn mount is detached lazily
+gpgconf --homedir /mnt/etc/pacman.d/gnupg --kill all 2>/dev/null || true
+for _ in 1 2 3; do
+  umount -R /mnt 2>/dev/null && break
+  fuser -km /mnt 2>/dev/null || true
+  sleep 1
+done
+if mountpoint -q /mnt; then umount -Rl /mnt || true; fi
 if [ "$JSON" -eq 1 ]; then
   emit "done" 1 "Hotovo. Vyjměte médium a restartujte."
 else
