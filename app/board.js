@@ -211,6 +211,20 @@ const CURSOR = [
 const pointer = { x: 0, y: 0, visible: false, last: 0, enabled: true };
 const hits = []; // clickable rows registered by the menus each frame: { x0, y0, x1, y1, hover, click }
 
+// Performance counters (written to /tmp/odjezdy.log every 10 s, shown with the V key): how long a whole frame
+// takes (render, conversion, writing to the framebuffer), how often, and how late timers fire (event-loop lag).
+const perf = { frames: 0, render: 0, convert: 0, write: 0, bytes: 0, lagMax: 0, since: Date.now(), last: null };
+function perfSummary() {
+  const dt = Math.max(1, Date.now() - perf.since) / 1000, f = Math.max(1, perf.frames);
+  return `${(perf.frames / dt).toFixed(1)} fps | render ${(perf.render / f).toFixed(0)} ms | conv ${(perf.convert / f).toFixed(0)} ms | write ${(perf.write / dt * 1000 / Math.max(1, perf.frames)).toFixed(0)} ms/frame, ${(perf.bytes / dt / 1024).toFixed(0)} KB/s | lag max ${perf.lagMax} ms | scale 1/${qualityFactor}`;
+}
+function perfTick() {
+  perf.last = perfSummary();
+  log('perf: ' + perf.last);
+  Object.assign(perf, { frames: 0, render: 0, convert: 0, write: 0, bytes: 0, lagMax: 0, since: Date.now() });
+}
+let lagAt = Date.now();
+let qualityFactor = 1, slowFrames = 0; // the native canvas is rendered at 1/qualityFactor of the screen size and enlarged (VMs)
 const mice = new Map(); // eventN -> { fd, absMax }
 function startMouse() {
   // Only pointing devices (mice, tablets, touchscreens): /proc/bus/input/devices lists a "mouseN"
@@ -330,7 +344,7 @@ class Screen {
   draw(m) {
     // full repaint every ~2 s in case kernel/console text was printed over the framebuffer;
     // every frame during the first ~5 s (boot messages, fbcon handover)
-    if (++this.frames % 30 === 0 || this.frames < 75) this.prev = null;
+    if (++this.frames <= 2 || Date.now() - (this.lastFull || 0) > 15000) { this.prev = null; this.lastFull = Date.now(); } // full repaint: at start and every 15 s (was every 2 s: a visible hiccup in VMs)
     const th = currentLook();
     if (th !== this.look) { this.look = th; this.prev = null; this.frame.fill(0); }
     const { frame, stride, pitch, offX, offY, bpp } = this;
@@ -368,9 +382,34 @@ class Screen {
   // regions: [{x, y, w, h}] = only these rectangles changed (scrollers), convert just them
   drawCanvas(cv, convert = true, regions = null) {
     const { frame, stride, bpp } = this;
-    const bytes = bpp / 8, rgb = cv.rgb;
+    const bytes = bpp / 8, rgb = cv.rgb, f = this.qf || 1; // f: the canvas is f times smaller than the screen
+    const fast = bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0;
     if (!convert) { /* frame is current */ }
-    else if (regions && bytes === 4 && stride === this.w * 4 && frame.byteOffset % 4 === 0) {
+    else if (f > 1 && fast) { // enlarge by f: convert each source row once, then copy it f - 1 times
+      const out = new Uint32Array(frame.buffer, frame.byteOffset, frame.length >> 2), W = this.w, H = this.h;
+      const box = regions || [{ x: 0, y: 0, w: cv.w, h: cv.h }];
+      for (const r of box) {
+        for (let sy = Math.max(0, r.y); sy < Math.min(cv.h, r.y + r.h); sy++) {
+          const dy = sy * f, x0 = r.x * f, x1 = Math.min(W, (r.x + r.w) * f);
+          if (dy >= H) break;
+          let i = (sy * cv.w + r.x) * 3, o = dy * W + x0;
+          for (let sx = 0; sx < r.w && o < dy * W + x1; sx++, i += 3) {
+            const px = 0xff000000 | (rgb[i] << 16) | (rgb[i + 1] << 8) | rgb[i + 2];
+            for (let k = 0; k < f && x0 + sx * f + k < x1; k++) out[o++] = px;
+          }
+          for (let j = 1; j < f && dy + j < H; j++) frame.copy(frame, (dy + j) * stride + x0 * 4, dy * stride + x0 * 4, dy * stride + x1 * 4);
+        }
+      }
+    } else if (f > 1) { // other pixel formats: plain nearest-neighbour loop
+      for (let y = 0; y < this.h; y++) {
+        let o = y * stride; const sy = Math.min(cv.h - 1, Math.floor(y / f));
+        for (let x = 0; x < this.w; x++, o += bytes) {
+          const i = (sy * cv.w + Math.min(cv.w - 1, Math.floor(x / f))) * 3;
+          if (bytes === 2) frame.writeUInt16LE(((rgb[i] >> 3) << 11) | ((rgb[i + 1] >> 2) << 5) | (rgb[i + 2] >> 3), o);
+          else { frame[o] = rgb[i + 2]; frame[o + 1] = rgb[i + 1]; frame[o + 2] = rgb[i]; if (bytes === 4) frame[o + 3] = 255; }
+        }
+      }
+    } else if (regions && fast) {
       const out = new Uint32Array(frame.buffer, frame.byteOffset, frame.length >> 2);
       for (const r of regions) {
         for (let y = Math.max(0, r.y); y < Math.min(this.h, r.y + r.h); y++) {
@@ -408,13 +447,16 @@ class Screen {
       if (this.sock.writableLength === 0 && !this.sock.destroyed) this.sock.write(Buffer.from(frame));
       return;
     }
-    if (!this.shown || ++this.flushes % 30 === 0 || this.flushes < 75) {
+    if (!this.shown || ++this.flushes <= 3 || Date.now() - (this.lastFullWrite || 0) > 15000) { // whole frame: at start, every 15 s
+      const w0 = Date.now();
       fs.writeSync(this.fd, frame, 0, frame.length, 0);
+      perf.write += Date.now() - w0; perf.bytes += frame.length;
+      this.lastFullWrite = Date.now();
       this.shown = Buffer.from(frame);
       return;
     }
     let y0 = -1;
-    const out = (a, b) => { const o = a * stride, n = (b - a) * stride; fs.writeSync(this.fd, frame, o, n, o); frame.copy(this.shown, o, o, o + n); };
+    const out = (a, b) => { const o = a * stride, n = (b - a) * stride, w0 = Date.now(); fs.writeSync(this.fd, frame, o, n, o); perf.write += Date.now() - w0; perf.bytes += n; frame.copy(this.shown, o, o, o + n); };
     for (let y = 0; y < this.h; y++) {
       const o = y * stride;
       const same = frame.compare(this.shown, o, o + stride, o, o + stride) === 0;
@@ -924,7 +966,12 @@ function renderNativeBoard(t) {
   const t1 = Date.now();
   lastNative = t1;
   pointer.drawnX = pointer.x; pointer.drawnY = pointer.y;
-  if (!nativeCanvas || nativeCanvas.w !== screen.w || nativeCanvas.h !== screen.h) nativeCanvas = new vector.Canvas(screen.w, screen.h);
+  // Quality: "auto" lowers the render size (x1/2, x1/3) when frames take too long (slow CPU / emulated graphics);
+  // the setting can force a factor. Everything the themes lay out scales with the canvas size, so they just get smaller.
+  const qs = state.cfg.custom?.quality ?? 'auto';
+  if (qs !== 'auto' && Number(qs) !== qualityFactor) { qualityFactor = Math.max(1, Math.min(4, Number(qs) || 1)); nativeCanvas = null; }
+  const cw = Math.ceil(screen.w / qualityFactor), ch = Math.ceil(screen.h / qualityFactor);
+  if (!nativeCanvas || nativeCanvas.w !== cw || nativeCanvas.h !== ch) { nativeCanvas = new vector.Canvas(cw, ch); screen.qf = qualityFactor; screen.shown = null; }
   scrollers.length = 0;
   try {
     th.renderNative(nativeCanvas, t, themeApi);
@@ -934,9 +981,23 @@ function renderNativeBoard(t) {
       c.roundRect((c.w - w) / 2, c.h / 2 - 32 * s, w, 64 * s, 10 * s, [255, 255, 255]);
       c.text(state.toast.text, c.w / 2, c.h / 2 + 10 * s, { font: 'FiraSans-Bold', size: 28 * s, color: [20, 20, 40], align: 'center' });
     }
+    if (state.perfShow) { // V key: the performance numbers on the screen
+      const c = nativeCanvas, s = Math.max(0.5, c.h / 720), txt = perf.last || perfSummary();
+      c.rect(0, 0, c.w, 28 * s, [0, 0, 0]);
+      c.text(txt, 8 * s, 20 * s, { font: 'FiraSans-Regular', size: 17 * s, color: [255, 255, 80], maxW: c.w - 16 * s });
+    }
   } catch (e) { log('native render: ' + e.stack); return false; }
+  const t2 = Date.now(), w0 = perf.write;
   screen.drawCanvas(nativeCanvas);
-  nativeCost = nativeCost * 0.7 + (Date.now() - t1) * 0.3; // render + convert + write to the screen
+  const t3 = Date.now(), writeMs = perf.write - w0;
+  perf.frames++; perf.render += t2 - t1; perf.convert += t3 - t2 - writeMs;
+  nativeCost = nativeCost * 0.7 + (t3 - t1) * 0.3; // render + convert + write to the screen
+  // auto quality: a few slow frames in a row while the time goes into rendering/conversion (not into writing,
+  // which a smaller canvas does not speed up) -> render smaller
+  if (qs === 'auto') {
+    if (t3 - t1 > 160 && writeMs < (t3 - t1) * 0.6 && qualityFactor < 3) { if (++slowFrames >= 3) { qualityFactor++; slowFrames = 0; nativeCanvas = null; nativeCost = 0; log(`quality: frames too slow (${t3 - t1} ms), rendering at 1/${qualityFactor}`); } }
+    else slowFrames = 0;
+  }
   return true;
 }
 function nativeDisruption(c, t, th) {
@@ -1289,6 +1350,7 @@ const SETTINGS = [
   { key: 'disruptions', label: 'Oznámení mimořádností', values: () => [true, 5, false], show: (v) => (v === false ? 'vypnutá' : v === 5 ? 'každých 5 min' : 'každé 2 min') },
   { key: 'updates', label: 'Aktualizace', values: () => ['ask', 'auto', 'off'], show: (v) => ({ ask: 'zeptat se', auto: 'automaticky', off: 'vypnuté' })[v || 'ask'] },
   { key: 'fallback', label: 'Záloha Transitous při výpadku', values: () => [true, false], show: (v) => (v === false ? 'vypnutá' : 'zapnutá') },
+  { key: 'quality', label: 'Kvalita obrazu', values: () => ['auto', 1, 2, 3], show: (v) => ({ auto: 'automatická', 1: 'plná', 2: 'úsporná (poloviční)', 3: 'velmi úsporná (třetinová)' })[v ?? 'auto'] },
   { key: 'paging', label: 'Stránkování', values: () => [true, false], show: (v) => (v === false ? 'jen první stránka' : 'střídat stránky') },
   { key: 'cursor', label: 'Kurzor myši', values: () => [true, 'always', false], show: (v) => (v === false ? 'vypnutý' : v === 'always' ? 'vždy viditelný' : 'při pohybu myši') },
 ];
@@ -1982,6 +2044,7 @@ function onKey(k) {
   if (state.mode === 'board') {
     if (k === 's' || k === 'S' || k === '\r' || k === ' ') openStart(false);
     else if (k === 't' || k === 'T') cycleTheme(1);
+    else if (k === 'v' || k === 'V') state.perfShow = !state.perfShow; // performance numbers on/off
     else if (k === 'q' || k === 'Q' || k === '\u0003') shutdown(10);
     else if (/^[1-9]$/.test(k) && state.cfg.favorites?.[+k - 1]) chooseStop(state.cfg.favorites[+k - 1]);
     return;
@@ -2102,7 +2165,11 @@ function tick() {
     m.hline(x0, x0 + w - 1, y0 + 15, C.WHITE);
     m.text(state.toast.text, x0 + 4, y0 + 3, 'normal', C.WHITE);
   }
+  if (state.perfShow) m.text(fitText(perf.last || perfSummary(), 'small', m.cols - 4), 2, 1, 'small', C.YELLOW);
+  const d0 = Date.now(), w0 = perf.write;
   screen.draw(m);
+  const dt = Date.now() - d0, wr = perf.write - w0;
+  perf.frames++; perf.render += dt - wr; perf.convert += 0; // LED path: dot painting; the write part is counted in perf.write
 }
 
 function shutdown(code = 0) {
@@ -2216,6 +2283,8 @@ async function main() {
   startMouse();
   setInterval(tick, 66);
   setInterval(scrollTick, 33);
+  setInterval(() => { const n = Date.now(); perf.lagMax = Math.max(perf.lagMax, n - lagAt - 100); lagAt = n; }, 100); // how late a 100 ms timer fires
+  setInterval(perfTick, 10000);
   setTimeout(updateLoop, 45000); // first check once the network is surely up
   if (__dirname === updater.UPDATE_DIR) setTimeout(() => updater.confirm(__dirname), 20000); // new version runs fine
 }

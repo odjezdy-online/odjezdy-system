@@ -222,7 +222,12 @@ class Canvas {
     this.w = w; this.h = h;
     this.rgb = new Uint8Array(w * h * 3);
   }
-  clear(col) { for (let i = 0; i < this.w * this.h; i++) { this.rgb[i * 3] = col[0]; this.rgb[i * 3 + 1] = col[1]; this.rgb[i * 3 + 2] = col[2]; } }
+  clear(col) { // memset-style: fill the first pixel, then double the filled area with copyWithin
+    const rgb = this.rgb, n = rgb.length;
+    if (col[0] === col[1] && col[1] === col[2]) { rgb.fill(col[0]); return; }
+    rgb[0] = col[0]; rgb[1] = col[1]; rgb[2] = col[2];
+    for (let have = 3; have < n; have *= 2) rgb.copyWithin(have, 0, Math.min(have, n - have));
+  }
   blend(x, y, col, a) {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h || a <= 0) return;
     const o = (y * this.w + x) * 3;
@@ -241,14 +246,18 @@ class Canvas {
   // rounded rectangle with anti-aliased corners (r = radius in px)
   roundRect(x, y, w, h, r, col) {
     r = Math.min(r, h / 2, w / 2);
-    for (let yy = Math.floor(y); yy < Math.ceil(y + h); yy++) {
-      for (let xx = Math.floor(x); xx < Math.ceil(x + w); xx++) {
-        const px = xx + 0.5, py = yy + 0.5;
-        const dx = Math.max(x + r - px, 0, px - (x + w - r)), dy = Math.max(y + r - py, 0, py - (y + h - r));
-        const d = Math.hypot(dx, dy) - r;
-        const a = d <= -0.5 ? 255 : d >= 0.5 ? 0 : Math.round((0.5 - d) * 255);
-        if (a) this.blend(xx, yy, col, a);
+    const x0 = Math.floor(x), x1 = Math.ceil(x + w), y0 = Math.floor(y), y1 = Math.ceil(y + h);
+    const cov = (dx, dy) => { const d = Math.hypot(dx, dy) - r; return d <= -0.5 ? 255 : d >= 0.5 ? 0 : Math.round((0.5 - d) * 255); };
+    const midL = Math.ceil(x + r), midR = Math.floor(x + w - r); // columns whose centres lie in the straight band
+    for (let yy = y0; yy < y1; yy++) {
+      const py = yy + 0.5, dy = Math.max(y + r - py, 0, py - (y + h - r));
+      for (let xx = x0; xx < Math.min(x1, midL); xx++) { const a = cov(x + r - (xx + 0.5), dy); if (a) this.blend(xx, yy, col, a); } // left corner / edge
+      if (midR > midL) { // straight middle: one coverage value for the whole span
+        const a = cov(0, dy);
+        if (a >= 255) this.rect(midL, yy, midR - midL, 1, col);
+        else if (a) for (let xx = midL; xx < midR; xx++) this.blend(xx, yy, col, a);
       }
+      for (let xx = Math.max(midL, midR, x0); xx < x1; xx++) { const a = cov(Math.max(0, (xx + 0.5) - (x + w - r)), dy); if (a) this.blend(xx, yy, col, a); } // right corner / edge
     }
   }
   hline(x0, x1, y, col, thick = 1) { this.rect(x0, y, x1 - x0, thick, col); }
