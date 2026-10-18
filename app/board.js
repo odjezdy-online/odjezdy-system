@@ -645,8 +645,20 @@ const cleanText = (t) => String(t || '').replace(/\s+/g, ' ').trim();
 const fmtDay = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${d.getDate()}. ${d.getMonth() + 1}.`; };
 function validityText(a) {
   const from = a.validFrom ? fmtDay(a.validFrom) : '', to = a.validTo && new Date(a.validTo).getTime() - Date.now() < 366 * 86400000 ? fmtDay(a.validTo) : '';
-  if (from && to && from !== to) return `Platí od ${from} do ${to}`;
+  if (from && to && from === to) { // one day: with the hours when it is not the whole day
+    const f = new Date(a.validFrom), t = new Date(a.validTo), hm = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return `Platí ${from}` + (hm(f) !== '0:00' || hm(t) !== '23:59' ? ` ${hm(f)}–${hm(t)}` : '');
+  }
+  if (from && to) return `Platí od ${from} do ${to}`;
   return to ? `Platí do ${to}` : from ? `Platí od ${from}` : '';
+}
+// An alert is shown at a stop only while it is valid or starts within 36 hours (a diversion planned for 31 October
+// is not a "Mimořádnost" on the 18th), and not after it ended.
+function alertActive(a) {
+  const now = Date.now();
+  if (a.validTo && new Date(a.validTo).getTime() < now) return false;
+  if (a.validFrom && new Date(a.validFrom).getTime() > now + 36 * 3600000) return false;
+  return true;
 }
 function noteAlert(a) {
   const text = cleanText(a.summary || a.title);
@@ -670,7 +682,12 @@ async function fetchBoardRows(ids) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
       // PID notices from the departure board itself (infotexts: inline strip / full-screen) plus our alerts
-      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...(j.alerts || []).map(noteAlert)].filter(Boolean);
+      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...(j.alerts || []).filter(alertActive).filter((al) => {
+        // an alert that names no stops and was matched by line number only belongs to this stop only when a departure
+        // of the alert's own operator runs here (a DÚK alert about U1/R15 must not follow ČD's R15 to Praha)
+        const provs = new Set((j.data || []).map((d) => d.provider));
+        return !al.provider || (al.stops && al.stops.length) || provs.has(al.provider);
+      }).map(noteAlert)].filter(Boolean);
       return j.data || [];
     } catch (e) {
       if (!/^HTTP (404|400)/.test(e.message)) throw e;
@@ -756,7 +773,7 @@ async function refreshAlerts() {
   const lines = new Set(state.deps.map((d) => String(d.line)));
   const clean = (s) => s.replace(/\s+/g, ' ').trim();
   // stop-level notices -> footer marquee
-  state.alerts = list.filter((a) =>
+  state.alerts = list.filter(alertActive).filter((a) =>
     (a.stops || []).some((s) => norm(s) === name || name.includes(norm(s))) ||
     (a.provider === 'PID' && (a.lines || []).some((l) => lines.has(String(l))))
   ).map(noteAlert);
