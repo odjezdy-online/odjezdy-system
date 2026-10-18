@@ -28,7 +28,7 @@ module.exports = {
   nativeFont: F.semi,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, platformOf, depNotice, stopLabel } = api;
-    const s = c.h / 720, W = c.w, rail = (d) => d.type === 'train' || d.type === 'rail';
+    const s = Math.min(c.w / 1280, c.h / 720), W = c.w, rail = (d) => d.type === 'train' || d.type === 'rail';
     const deps = api.upcoming();
     const pitch = Math.max(2, Math.floor(W / 420));
     c.clear([0, 0, 0]);

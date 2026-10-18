@@ -76,7 +76,7 @@ const FS = { reg: 'Lato-Regular', bold: 'Lato-Bold' };
 
 function nativeSBB(c, t, api) {
   const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
-  const s = c.h / 720, W = c.w, x0 = 36 * s, x1 = W - 36 * s;
+  const s = Math.min(c.w / 1280, c.h / 720), W = c.w, x0 = 36 * s, x1 = W - 36 * s;
   c.clear(SB.blue);
   const head = ['Odjezd', 'Abfahrt', 'Départ', 'Partenza'][Math.floor(t / 4000) % 4];
   c.text(head, x0, 74 * s, { font: FS.bold, size: 58 * s, color: SB.white });

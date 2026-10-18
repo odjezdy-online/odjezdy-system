@@ -145,7 +145,7 @@ function pill(c, x, yTop, label, bg, fg, s, size = 17, radius = 999) {
 
 function nativeRender(c, t, api) {
   const { state, hhmm, depTime, platformOf, depNotice, stopLabel } = api;
-  const s = c.h / 720, W = c.w;
+  const s = Math.min(c.w / 1280, c.h / 720), W = c.w;
   const x0 = Math.max(40 * s, (W - 1400 * s) / 2), x1 = W - x0;
   c.clear(N.bg);
 

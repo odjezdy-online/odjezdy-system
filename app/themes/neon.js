@@ -25,7 +25,7 @@ module.exports = {
   nativeFont: F.bold,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
-    const s = c.h / 720, W = c.w, H = c.h, x0 = 40 * s, x1 = W - 40 * s;
+    const s = Math.min(c.w / 1280, c.h / 720), W = c.w, H = c.h, x0 = 40 * s, x1 = W - 40 * s;
     c.clear(N.bg);
     // perspective floor grid in the lower third
     const hz = H * 0.62;

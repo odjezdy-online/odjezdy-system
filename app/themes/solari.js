@@ -20,7 +20,7 @@ module.exports = {
   nativeFont: FONT,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, minutesTo, platformOf, stopLabel, depNotice } = api;
-    const s = c.h / 720, W = c.w, x0 = 26 * s, x1 = W - 26 * s;
+    const s = Math.min(c.w / 1280, c.h / 720), W = c.w, x0 = 26 * s, x1 = W - 26 * s;
     c.clear(S.bg);
     // tile size from the width: time + line + destination + platform columns plus gaps
     const cells = COLS.time + COLS.line + COLS.dest + COLS.plat, gaps = 3;

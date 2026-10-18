@@ -107,7 +107,7 @@ const ORDN = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10
 
 function nativeUK(c, t, api) {
   const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
-  const s = c.h / 720, W = c.w, x0 = 24 * s, x1 = W - 24 * s;
+  const s = Math.min(c.w / 1280, c.h / 720), W = c.w, x0 = 24 * s, x1 = W - 24 * s;
   c.clear([0, 0, 0]);
   const now = new Date();
   const clock = `${hhmm(now)}:${api.pad2(now.getSeconds())}`;

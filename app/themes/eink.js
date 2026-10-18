@@ -17,7 +17,7 @@ module.exports = {
   nativeFont: F.bold,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
-    const s = c.h / 720, W = c.w, x0 = 48 * s, x1 = W - 48 * s;
+    const s = Math.min(c.w / 1280, c.h / 720), W = c.w, x0 = 48 * s, x1 = W - 48 * s;
     c.clear(E.paper);
     c.text(stopLabel(state.cfg.stop), x0, 76 * s, { font: F.bold, size: 48 * s, color: E.ink, maxW: W * 0.7 });
     c.text(hhmm(new Date()), x1, 76 * s, { font: F.bold, size: 48 * s, color: E.ink, align: 'right' });

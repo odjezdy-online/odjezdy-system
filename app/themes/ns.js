@@ -17,7 +17,7 @@ module.exports = {
   nativeFont: F.bold,
   renderNative(c, t, api) {
     const { state, hhmm, depTime, minutesTo, platformOf, depNotice, stopLabel } = api;
-    const s = c.h / 720, W = c.w, x0 = 34 * s, x1 = W - 34 * s;
+    const s = Math.min(c.w / 1280, c.h / 720), W = c.w, x0 = 34 * s, x1 = W - 34 * s;
     c.clear(N.blue);
     c.rect(0, 0, W, 96 * s, N.band);
     c.text('Vertrek', x0, 64 * s, { font: F.bold, size: 46 * s, color: N.blue });
