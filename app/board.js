@@ -639,12 +639,26 @@ async function hasApiV2() {
   }
   return apiV2;
 }
+// A stop-level alert as one line of text for the marquee/notice, remembering its details and validity
+// (state.alertInfo, keyed by that text) for the full-screen notice: summary = headline, details = the specifics.
+const cleanText = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+const fmtDay = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${d.getDate()}. ${d.getMonth() + 1}.`; };
+function validityText(a) {
+  const from = a.validFrom ? fmtDay(a.validFrom) : '', to = a.validTo && new Date(a.validTo).getTime() - Date.now() < 366 * 86400000 ? fmtDay(a.validTo) : '';
+  if (from && to && from !== to) return `Platí od ${from} do ${to}`;
+  return to ? `Platí do ${to}` : from ? `Platí od ${from}` : '';
+}
+function noteAlert(a) {
+  const text = cleanText(a.summary || a.title);
+  if (!text) return '';
+  (state.alertInfo ||= new Map()).set(text, { details: cleanText(a.details), valid: validityText(a), kind: a.kind || '' });
+  return text;
+}
 async function fetchBoardRows(ids) {
   if (await hasApiV2()) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
-      const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
-      state.v2Alerts = (j.alerts || []).map((a) => clean(a.summary || a.title)).filter(Boolean);
+      state.v2Alerts = (j.alerts || []).map(noteAlert).filter(Boolean);
       return j.data || [];
     } catch (e) {
       if (!/^HTTP (404|400)/.test(e.message)) throw e;
@@ -733,7 +747,7 @@ async function refreshAlerts() {
   state.alerts = list.filter((a) =>
     (a.stops || []).some((s) => norm(s) === name || name.includes(norm(s))) ||
     (a.provider === 'PID' && (a.lines || []).some((l) => lines.has(String(l))))
-  ).map((a) => clean(a.summary || a.title));
+  ).map(noteAlert);
   state.alerts = [...new Set([...state.alerts, ...(state.v2Alerts || [])])].slice(0, 6); // + alerts from /api/v2
   // line-level notices -> second (small-font) row under that departure.
   // Matched via a.lines, or by the line being named in the title — only for codes like "X12"
@@ -872,14 +886,27 @@ function nativeDisruption(c, t, th) {
     if (c.measure(n, font, 30 * s) > c.w - 160 * s && cur) { lines.push(cur); cur = w; } else cur = n;
   }
   if (cur) lines.push(cur);
-  const shown = lines.slice(0, 5), h = 110 * s + shown.length * 42 * s;
+  // body text in the regular cut of the theme font; not every family has one (Barlow Condensed: Medium)
+  const body = [font.replace(/-(Semi)?Bold$/, '-Regular'), font.replace(/-(Semi)?Bold$/, '-Medium'), font].find((f) => vector.findFont(f));
+  // headline (the summary), then the details and the validity when the server provides them
+  const info = state.alertInfo?.get(text) || {};
+  const detailLines = [];
+  let dcur = '';
+  for (const w of String(info.details || '').split(/\s+/).filter(Boolean)) {
+    const n = dcur ? dcur + ' ' + w : w;
+    if (c.measure(n, body, 24 * s) > c.w - 160 * s && dcur) { detailLines.push(dcur); dcur = w; } else dcur = n;
+  }
+  if (dcur) detailLines.push(dcur);
+  const shown = lines.slice(0, 3), det = detailLines.slice(0, 4);
+  const h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
   const y0 = (c.h - h) / 2;
   c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
   c.rect(60 * s, y0, 14 * s, h, [236, 0, 22]);
   c.text('Mimořádnost', 110 * s, y0 + 62 * s, { font, size: 40 * s, color: [236, 0, 22] });
-  // body text in the regular cut of the theme font; not every family has one (Barlow Condensed: Medium)
-  const body = [font.replace(/-(Semi)?Bold$/, '-Regular'), font.replace(/-(Semi)?Bold$/, '-Medium'), font].find((f) => vector.findFont(f));
-  shown.forEach((l, i) => c.text(l, 110 * s, y0 + 112 * s + i * 42 * s, { font: body, size: 30 * s, color: [20, 20, 40] }));
+  let yy = y0 + 112 * s;
+  shown.forEach((l) => { c.text(l, 110 * s, yy, { font, size: 30 * s, color: [20, 20, 40] }); yy += 42 * s; });
+  if (det.length) { yy += 12 * s - 6 * s; det.forEach((l) => { c.text(l, 110 * s, yy, { font: body, size: 24 * s, color: [70, 70, 90] }); yy += 34 * s; }); }
+  if (info.valid) c.text(info.valid, 110 * s, yy + 8 * s, { font, size: 24 * s, color: [236, 0, 22] });
 }
 
 function renderBoard(m, t) {
@@ -949,15 +976,22 @@ function renderDisruption(m, t) {
   const th = currentTheme();
   if (typeof th.renderAlert === 'function') { th.renderAlert(m, t, themeApi, text); return true; }
   const W = m.cols, big = face('big').rows, nor = face('normal').rows;
-  const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.floor((m.rows - big - 30) / (nor + 3))));
-  const h = big + 10 + lines.length * (nor + 3) + 6;
+  const info = state.alertInfo?.get(text) || {}, sm = face('small').rows;
+  const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.min(3, Math.floor((m.rows - big - 30) / (nor + 3)))));
+  const room = Math.max(0, Math.floor((m.rows - big - 20 - lines.length * (nor + 3) - (info.valid ? sm + 4 : 0)) / (sm + 2)));
+  const det = info.details ? wrapText(info.details, 'small', W - 16, Math.min(4, room)) : [];
+  const h = big + 10 + lines.length * (nor + 3) + (det.length ? 4 + det.length * (sm + 2) : 0) + (info.valid ? sm + 4 : 0) + 6;
   const y0 = Math.max(0, Math.floor((m.rows - h) / 2));
   for (let y = y0; y < y0 + h; y++) for (let x = 0; x < W; x++) m.set(x, y, 0);
   m.hline(0, W - 1, y0, C.RED);
   m.hline(0, W - 1, y0 + h - 1, C.RED);
   // blinking warning title, like "Störung" / "Mimořádnost" screens
   if (Math.floor(t / 700) % 2 === 0 || phase > 2800) m.textCenter('Mimořádnost', y0 + 4, 'big', C.RED);
-  lines.forEach((l, i) => m.textCenter(l, y0 + big + 8 + i * (nor + 3), 'normal', C.WHITE));
+  let yy = y0 + big + 8;
+  lines.forEach((l) => { m.textCenter(l, yy, 'normal', C.WHITE); yy += nor + 3; });
+  yy += det.length ? 4 : 0;
+  det.forEach((l) => { m.textCenter(l, yy, 'small', C.AMBER); yy += sm + 2; });
+  if (info.valid) m.textCenter(info.valid, yy + 2, 'small', C.RED);
   if (list.length > 1) m.textRight(`${slot.i + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
   return true;
 }
@@ -2052,7 +2086,7 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
-    if (args.includes('--alert')) { state.alerts = [args[args.indexOf('--alert') + 1]]; t0 = Date.now() - 22000; }
+    if (args.includes('--alert')) { const tx = args[args.indexOf('--alert') + 1]; state.alerts = [tx]; if (args.includes('--details')) state.alertInfo = new Map([[tx, { details: args[args.indexOf('--details') + 1], valid: 'Platí od 19. 10. do 31. 10.' }]]); t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
     if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.t0 = Date.now() - 83000; state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
