@@ -257,23 +257,40 @@ Include = /etc/pacman.d/mirrorlist
 SigLevel = Optional TrustAll
 Server = file:///srv/odjezdy-repo
 C
-pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
+# pacstrap's output is line-buffered (stdbuf) so the log and the progress follow it live; "\r" updates
+# (progress bars) are split into lines. Progress comes from whatever shape pacman prints without a
+# terminal: "Packages (N) ...", "(12/391) installing x", "installing x...", "x downloading...".
+# When nothing parseable arrives for 20 s a heartbeat event keeps the bar creeping so it never looks frozen.
+stdbuf -oL -eL pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
   linux-firmware-radeon linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek \
   linux-firmware-broadcom intel-ucode amd-ucode kbd iwd nodejs odjezdy-board grub efibootmgr sudo nano 2>&1 \
+  | stdbuf -oL tr '\r' '\n' \
   | {
-      # pacman prints no (n/m) counters when it is not on a terminal: the total comes from its
-      # "Packages (N) ..." line, then every "<pkg> downloading..." and "installing <pkg>..." is one step
-      total=0; dl=0; inst=0; phase=resolve
-      while IFS= read -r line; do
-        printf '%s\n' "$line"
-        if [[ $line =~ ^Packages\ \(([0-9]+)\) ]]; then total=${BASH_REMATCH[1]}
-        elif [[ $line == *"Retrieving packages"* ]]; then phase=download
-        elif [[ $line == "installing "* ]]; then
-          phase=install; inst=$((inst + 1))
-          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$inst" -v m="$total" 'BEGIN{printf "%.2f", 0.45 + 0.35*n/m}')" "Instaluji balíček $inst z $total"
-        elif [ "$phase" = download ] && [[ $line == *" downloading..." ]]; then
-          dl=$((dl + 1))
-          [ "$total" -gt 0 ] && emit pacstrap "$(awk -v n="$dl" -v m="$total" 'BEGIN{printf "%.2f", 0.10 + 0.35*(n>m?m:n)/m}')" "Stahuji balíček $dl z $total"
+      total=0; dl=0; inst=0; phase=resolve; prog=0.10; started=$SECONDS
+      bump() {   # bump PROGRESS MESSAGE: never goes backwards
+        prog=$(awk -v p="$prog" -v n="$1" 'BEGIN{printf "%.2f", (n > p ? n : p)}')
+        emit pacstrap "$prog" "$2"
+      }
+      while :; do
+        if IFS= read -r -t 20 line; then
+          printf '%s\n' "$line"
+          if [[ $line =~ ^Packages\ \(([0-9]+)\) ]]; then total=${BASH_REMATCH[1]}
+          elif [[ $line == *"Retrieving packages"* ]]; then phase=download
+          elif [[ $line =~ ^(\(\ *([0-9]+)/([0-9]+)\)\ +)?installing\ +[^[:space:]] ]]; then
+            phase=install; inst=$((inst + 1))
+            [ -n "${BASH_REMATCH[2]:-}" ] && { inst=${BASH_REMATCH[2]}; total=${BASH_REMATCH[3]}; }
+            [ "$total" -gt 0 ] && bump "$(awk -v n="$inst" -v m="$total" 'BEGIN{printf "%.2f", 0.45 + 0.35*(n>m?m:n)/m}')" "Instaluji balíček $inst z $total"
+          elif [[ $line == *"downloading..."* ]]; then
+            dl=$((dl + 1))
+            [ "$total" -gt 0 ] && bump "$(awk -v n="$dl" -v m="$total" 'BEGIN{printf "%.2f", 0.10 + 0.35*(n>m?m:n)/m}')" "Stahuji balíček $dl z $total"
+          fi
+        else
+          rc=$?
+          [ "$rc" -gt 128 ] || break   # EOF: pacstrap is done; a timeout just means "quiet for 20 s"
+          # creep: at most +0.01 per heartbeat, never past the end of the current phase
+          limit=0.44; [ "$phase" = install ] && limit=0.79
+          prog=$(awk -v p="$prog" -v l="$limit" 'BEGIN{p += 0.01; printf "%.2f", (p > l ? l : p)}')
+          emit pacstrap "$prog" "Instaluji systém, běží $((SECONDS - started)) s (potřebuje internet)"
         fi
       done
     }
