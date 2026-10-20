@@ -348,7 +348,7 @@ else
   # the board is a Wayland client under cage on tty1; a login or the chosen desktop waits on tty2
   arch-chroot /mnt systemctl enable odjezdy-kiosk >/dev/null
   arch-chroot /mnt systemctl set-default graphical.target >/dev/null
-  DM=""; DMDROP=""
+  DM=""
   case "$DESKTOP" in
     plasma) DM=sddm
       install -Dm644 /dev/stdin /mnt/etc/sddm.conf.d/10-odjezdy.conf <<'C'
