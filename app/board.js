@@ -2470,7 +2470,12 @@ function watchWl(conn) {
   const again = async (tries) => {
     try {
       const c = await displays.wlConnect(n);
-      if (c.w !== screen.w || c.h !== screen.h || c.stride !== screen.stride) { log(`wayland output ${n} is now ${c.w}x${c.h}, restarting`); process.exit(0); }
+      if (c.w !== screen.w || c.h !== screen.h || c.stride !== screen.stride) {
+        // the compositor may still be settling right after start: give it a few seconds before restarting (a restart loop = black window)
+        c.sock.destroy();
+        if (tries < 5) { setTimeout(() => again(tries + 1), 1500); return; }
+        log(`wayland output ${n} is now ${c.w}x${c.h}, restarting`); process.exit(0);
+      }
       screen.sock = c.sock; screen.shown = null; c.sock.on('close', () => again(0));
     } catch (e) {
       if (tries > 20) { log('wayland output lost: ' + e.message); process.exit(0); }
