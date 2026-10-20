@@ -2,6 +2,11 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.12
+- Nové vzhledy podle českých nádražních tabulí: Gema (hala), Elen (hala s LED body a tabule kolejí), Elektročas (nástupiště a hala Odjezd/Abfahrt), Elekon, SŽDC s hodinami, autobusy + vlaky
+- Obecné vzhledy podle normy SŽ SM118: SŽ tabule, LCD nádraží (světlé), LED nádraží (jantar)
+- Halové vzhledy vyplní celou obrazovku, sloupec Zpoždění je vycentrovaný pod nadpisem
+
 ## 0.5.11
 - U vlaků bez nástupiště se ukáže ikonka vlaku (ve všech vzhledech)
 - Číslo vlaku jako drobný text („Os 6925“, „č. 678“)
