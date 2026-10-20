@@ -35,6 +35,18 @@ jobs:
           for mode in bios uefi; do
             SMOKE_KEEP="$RUNNER_TEMP/installed-$mode.png" arch/test/install-test.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso $mode
           done
+      - name: Install test, desktop mode (Wayland kiosk, XFCE)
+        run: |
+          for d in kiosk xfce; do
+            DESKTOP=$d SMOKE_KEEP="$RUNNER_TEMP/desktop-$d.png" arch/test/install-test.sh "$RUNNER_TEMP"/out/odjezdy-os-*.iso bios
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: desktop-screens
+          path: ${{ runner.temp }}/desktop-*.png
+          if-no-files-found: ignore
+          retention-days: 3
       # archive: false -> the .iso itself is downloadable, not wrapped in a .zip
       - uses: actions/upload-artifact@v7
         with:

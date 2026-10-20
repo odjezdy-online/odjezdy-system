@@ -2,14 +2,18 @@
 # Installs the ISO onto an empty virtual disk with `odjezdy-install --json`, checks the JSON progress
 # contract, then boots the installed system from that disk and checks that the board is drawn.
 # Needs internet (pacstrap downloads packages), qemu, python3.
-# Usage: arch/test/install-test.sh ISO [bios|uefi]
+# Usage: [DESKTOP=kiosk|plasma|gnome|xfce] arch/test/install-test.sh ISO [bios|uefi]
+#   with DESKTOP the installed system is the Wayland kiosk variant: tty1 must draw the board (cage + odjezdy-wl),
+#   tty2 something else (login/display manager), and the kiosk service must be active (diagnostics go to serial)
 set -euo pipefail
-ISO="${1:?usage: install-test.sh ISO [bios|uefi]}"; MODE="${2:-bios}"
+ISO="${1:?usage: install-test.sh ISO [bios|uefi]}"; MODE="${2:-bios}"; DESKTOP="${DESKTOP:-none}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"; trap 'kill "$QPID" 2>/dev/null || true; [ -n "${KEEP:-}" ] || rm -rf "$TMP"' EXIT
 ACCEL=(); K=1; [ -w /dev/kvm ] && ACCEL=(-enable-kvm) || K=4
 QMP="$TMP/qmp.sock"; SER="$TMP/serial.log"
-qemu-img create -q -f raw "$TMP/disk.img" 6G
+MEM=2048; DISKSZ=6G
+[ "$DESKTOP" = none ] || { MEM=3072; DISKSZ=12G; }
+qemu-img create -q -f raw "$TMP/disk.img" "$DISKSZ"
 
 FW=()
 if [ "$MODE" = uefi ]; then
@@ -26,7 +30,7 @@ fi
 
 start() {   # start QEMU with the given extra drive arguments
   : > "$SER"
-  qemu-system-x86_64 "${ACCEL[@]}" -machine q35 -m 2048 "${FW[@]}" "$@" \
+  qemu-system-x86_64 "${ACCEL[@]}" -machine q35 -m $MEM "${FW[@]}" "$@" \
     -drive "file=$TMP/disk.img,format=raw,if=virtio" -vga std -nic user,model=virtio-net-pci \
     -display none -serial "file:$SER" -qmp "unix:$QMP,server=on,wait=off" &
   QPID=$!
@@ -44,7 +48,7 @@ python3 "$HERE/qmp.py" "$QMP" key alt+f2; sleep 3
 # the live default keymap is cz (QWERTZ) and qmp.py types US key positions: switch with a command
 # that survives that (the Y key position produces "z" on cz, hence the odd spelling)
 python3 "$HERE/qmp.py" "$QMP" type 'loadkezs us\n'; sleep 2
-python3 "$HERE/qmp.py" "$QMP" type 'odjezdy-install --json --disk /dev/vda --yes > /dev/ttyS0 2>&1; echo INSTALL-EXIT-$? > /dev/ttyS0\n'
+python3 "$HERE/qmp.py" "$QMP" type 'odjezdy-install --json --disk /dev/vda --yes --root-password test --desktop $DESKTOP > /dev/ttyS0 2>&1; echo INSTALL-EXIT-$? > /dev/ttyS0\n'
 wait_for 'INSTALL-EXIT-' $((900 * K)) || { echo "FAIL: installer did not finish"; tail -c 2000 "$SER" | tr -d '\000'; exit 1; }
 kill "$QPID"; wait "$QPID" 2>/dev/null || true
 
@@ -72,8 +76,31 @@ assert n > 10, ("too few pacstrap progress lines", n)
 print("OK:", len(objs), "progress lines,", n, "in pacstrap")
 '
 
-echo "== $MODE: boot the installed system from the disk"
+echo "== $MODE: boot the installed system from the disk (desktop: $DESKTOP)"
 start
+if [ "$DESKTOP" != none ]; then
+  sleep $((120 * K))
+  python3 "$HERE/qmp.py" "$QMP" shot "$TMP/vt1.png" >/dev/null
+  python3 "$HERE/qmp.py" "$QMP" key ctrl+alt+f2; sleep $((10 * K))
+  python3 "$HERE/qmp.py" "$QMP" shot "$TMP/vt2.png" >/dev/null
+  [ -n "${SMOKE_KEEP:-}" ] && cp "$TMP/vt2.png" "${SMOKE_KEEP%.png}-vt2.png"
+  # diagnostics from a root shell on tty2 (works for the plain getty; behind a display manager the keys go to the greeter)
+  python3 "$HERE/qmp.py" "$QMP" key alt+f3; sleep 3
+  python3 "$HERE/qmp.py" "$QMP" type 'root\n'; sleep 3
+  python3 "$HERE/qmp.py" "$QMP" type 'test\n'; sleep 3
+  python3 "$HERE/qmp.py" "$QMP" type 'loadkezs us\n'; sleep 1
+  python3 "$HERE/qmp.py" "$QMP" type '{ echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager | tail -60; ls -la /run/user/0 /dev/input; pgrep -a "cage|odjezdy-wl|node"; echo DIAG-END; } > /dev/ttyS0 2>&1\n'
+  wait_for 'DIAG-END' $((30 * K)) || echo "(no diagnostics from tty3)"
+  tr -d '\000\r' < "$SER" | sed -n '/DIAG-START/,/DIAG-END/p' | tail -100
+  S1=$(stat -c %s "$TMP/vt1.png"); S2=$(stat -c %s "$TMP/vt2.png")
+  echo "tty1 shot: $S1 bytes, tty2 shot: $S2 bytes"
+  [ -n "${SMOKE_KEEP:-}" ] && cp "$TMP/vt1.png" "${SMOKE_KEEP%.png}-vt1.png"
+  [ "$S1" -gt 5000 ] || { echo "FAIL: tty1 shows no board" >&2; exit 1; }
+  cmp -s "$TMP/vt1.png" "$TMP/vt2.png" && { echo "FAIL: tty2 looks like tty1 (no login / display manager)" >&2; exit 1; }
+  tr -d '\000\r' < "$SER" | grep -qx 'active' || { echo "FAIL: odjezdy-kiosk is not active" >&2; exit 1; }
+  echo "OK: $DESKTOP install boots, board on tty1, something else on tty2"
+  exit 0
+fi
 sleep $((70 * K))
 python3 "$HERE/qmp.py" "$QMP" shot "$TMP/screen.png" >/dev/null
 SIZE=$(stat -c %s "$TMP/screen.png")
