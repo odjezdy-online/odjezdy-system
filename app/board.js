@@ -23,6 +23,7 @@ if (!process.argv.includes('--png') && !process.env.ODJEZDY_NO_UPDATE) {
   if (alt) { require(path.join(alt, 'board.js')); return; }
 }
 const APP_VERSION = updater.versionOf(__dirname);
+const admin = require('./admin');
 
 const API = process.env.ODJEZDY_API || 'https://app.odjezdy.online';
 // Worldwide GTFS/GTFS-RT via Transitous (MOTIS 2). Open-source & non-commercial use only; requires a
@@ -468,7 +469,14 @@ class Screen {
   // ~4 MB, which is slow on emulated VGA (VirtualBox, QEMU TCG). Every ~2 s and after a VT switch the whole
   // frame goes out anyway, in case console text was printed over the framebuffer.
   flush() {
-    const { frame, stride } = this;
+    const { stride } = this;
+    let frame = this.frame;
+    const gain = this.gain ?? 1;
+    if (gain < 0.995 && this.bpp === 32) { // brightness from the schedule / "off": scale the colour bytes into a second buffer
+      const d = this.dimBuf && this.dimBuf.length === frame.length ? this.dimBuf : (this.dimBuf = Buffer.alloc(frame.length));
+      for (let i = 0; i < frame.length; i += 4) { d[i] = frame[i] * gain; d[i + 1] = frame[i + 1] * gain; d[i + 2] = frame[i + 2] * gain; d[i + 3] = 255; }
+      frame = d;
+    }
     if (this.sock) { // odjezdy-kms takes whole frames; drop this one if the previous is still on its way
       if (this.sock.writableLength === 0 && !this.sock.destroyed) this.sock.write(Buffer.from(frame));
       return;
@@ -1321,6 +1329,7 @@ function openStart(withCountdown) {
   if (state.displays.length > 1) items.push({ displays: true, label: `Displeje (${state.displays.length})…` });
   if (system.wifi.available()) items.push({ wifi: true, label: 'Wi-Fi a síť…' });
   if ((LIVE || process.env.ODJEZDY_INSTALL_CMD) && system.installer.available()) items.push({ install: true, label: 'Nainstalovat do počítače…' });
+  if (admin) items.push({ admin: true, label: 'Správa na dálku (web)…' });
   items.push({ update: true, label: state.update?.info ? `Aktualizovat na verzi ${state.update.info.version}…` : `Aktualizace (verze ${APP_VERSION})…` });
   state.start = { items, sel: 0, until: withCountdown ? Date.now() + START_TIMEOUT : 0 };
   state.mode = 'start';
@@ -1629,6 +1638,7 @@ function pickStart(it) {
   if (it.world) { state.mode = 'world'; state.world = { query: '', results: [], sel: 0, busy: false, err: null }; return; }
   if (it.settings) { state.mode = 'settings'; state.setSel = 0; return; }
   if (it.update) { openUpdate(true); return; }
+  if (it.admin) { state.mode = 'admin'; state.adminMsg = ''; return; }
   if (it.wifi) { openWifi(); return; }
   if (it.displays) { state.mode = 'displays'; state.dispSel = 0; return; }
   if (it.install) { openInstall(); return; }
@@ -1659,6 +1669,76 @@ async function updateLoop() {
   }
   setTimeout(updateLoop, UPDATE_EVERY);
 }
+// ---------------------------------------------------------------- remote administration (app/admin.js)
+const ADMIN_PORT = process.env.ODJEZDY_ADMIN_PORT !== undefined ? +process.env.ODJEZDY_ADMIN_PORT : 8080;
+function renderAdmin(m, t) {
+  const W = m.cols, L = layout(m);
+  m.text('Správa na dálku', 1, 1, 'big', C.AMBER);
+  m.hline(0, W - 1, L.headerLine, C.DIM);
+  let y = L.headerLine + 6;
+  if (!ADMIN_PORT) { m.text('Vypnuto (ODJEZDY_ADMIN_PORT=0).', 2, y, 'normal', C.DIM); return; }
+  m.text('V prohlížeči v téže síti otevři:', 2, y, 'normal', C.DIM); y += L.rowH + 2;
+  const addrs = admin.addresses(ADMIN_PORT);
+  (addrs.length ? addrs : ['(žádná síť)']).slice(0, 3).forEach((a) => { m.text(a, 2, y, 'normal', C.WHITE); y += L.rowH + 2; });
+  y += 4;
+  m.text('Heslo:', 2, y, 'normal', C.DIM); y += L.rowH + 2;
+  m.text(admin.readToken(), 2, y, 'big', C.AMBER); y += face('big').rows + 8;
+  m.text('N = nové heslo   Esc = zpět', 2, m.rows - L.sm - 4, 'small', C.DIM);
+  if (state.adminMsg) m.text(state.adminMsg, 2, m.rows - 2 * L.sm - 8, 'small', C.GREEN);
+}
+function adminKey(k) {
+  if (k === '\u001b' || k === 'q') { state.mode = 'start'; return; }
+  if (k === 'n' || k === 'N') { admin.newToken(); state.adminMsg = 'Nové heslo vytvořeno.'; }
+}
+// what the admin page may read and change
+function adminApi() {
+  const freeMb = () => { try { return Math.round(Number(/MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1024) + ' MB'; } catch { return '?'; } };
+  const temp = () => { try { return (Number(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8')) / 1000).toFixed(0) + ' °C'; } catch { return null; } };
+  const up = (s) => (s < 3600 ? Math.round(s / 60) + ' min' : s < 172800 ? (s / 3600).toFixed(1) + ' h' : Math.round(s / 86400) + ' dní');
+  return {
+    log,
+    status: () => ({
+      version: APP_VERSION, uptime: up(process.uptime()), stop: stopLabel(state.cfg.stop), theme: currentTheme().name, themeId: currentTheme().id,
+      themes: THEMES.map((th) => ({ id: th.id, name: th.name })), memory: Math.round(process.memoryUsage().rss / 1048576) + ' MB', free: freeMb(),
+      load: os.loadavg().map((x) => x.toFixed(2)).join(' '), temp: temp(), lastOk: state.lastOk ? new Date(state.lastOk).toLocaleTimeString('cs-CZ') : null,
+      gain: Math.round((screen?.gain ?? 1) * 100), displays: (state.displays?.length || 1) + '×', brightness: state.cfg.custom?.brightness ?? 100, schedule: state.cfg.schedule || [],
+    }),
+    searchStops: (q) => searchStops(q, 8).map(pickStop),
+    logTail: () => { try { const b = fs.readFileSync('/tmp/odjezdy.log'); return b.slice(Math.max(0, b.length - 12000)).toString('utf8'); } catch { return ''; } },
+    applyConfig: (b) => {
+      if (b.stop) {
+        if (!b.stop.name || !Array.isArray(b.stop.ids) || !b.stop.ids.length || b.stop.ids.some((x) => typeof x !== 'string' || x.length > 64)) throw new Error('bad stop');
+        chooseStop(pickStop(b.stop));
+      }
+      if (b.theme) { if (!THEMES.some((th) => th.id === b.theme)) throw new Error('unknown theme'); state.cfg.theme = b.theme; }
+      if (b.custom && typeof b.custom === 'object') {
+        const br = Number(b.custom.brightness);
+        if (Number.isFinite(br)) state.cfg.custom = { ...(state.cfg.custom || {}), brightness: Math.max(10, Math.min(100, Math.round(br))) };
+      }
+      if (b.schedule) {
+        if (!Array.isArray(b.schedule) || b.schedule.length > 20) throw new Error('bad schedule');
+        state.cfg.schedule = b.schedule.map((x) => ({ days: (x.days || []).filter((d) => d >= 1 && d <= 7), from: String(x.from), to: String(x.to), brightness: Math.max(0, Math.min(100, Number(x.brightness) || 0)) }));
+        applySchedule();
+      }
+      saveConfig(state.cfg);
+    },
+    action: (a) => {
+      log('admin action: ' + a);
+      if (a === 'restart') process.exit(0);
+      if (a === 'reboot') require('child_process').execFile('reboot', [], () => {});
+      if (a === 'poweroff') require('child_process').execFile('poweroff', [], () => {});
+      if (a === 'clear-cache') { try { if (CACHE_FILE) fs.unlinkSync(CACHE_FILE); } catch {} state.deps = []; state.lastOk = 0; kick(); }
+      if (a === 'update' && !LIVE) updater.check(APP_VERSION, USER_AGENT).then((info) => info && updater.install(info, USER_AGENT, () => {}).then(() => process.exit(0))).catch((e) => log('admin update: ' + e.message));
+    },
+  };
+}
+// the schedule decides the brightness of the whole screen (0 = dark); checked every 15 s
+function applySchedule() {
+  if (!screen) return;
+  const g = admin.scheduledBrightness(state.cfg.schedule) / 100;
+  if (Math.abs((screen.gain ?? 1) - g) > 0.001) { screen.gain = g; screen.shown = null; log('schedule: brightness ' + Math.round(g * 100) + ' %'); }
+}
+
 function openUpdate(manual) {
   const u = state.update = { ...(state.update || {}), sel: 0, until: manual ? 0 : Date.now() + 120000, err: null };
   if (!u.busy) u.msg = null;
@@ -2163,6 +2243,7 @@ function onKey(k) {
   if (state.mode === 'settings') return settingsKey(k);
   if (state.mode === 'world') return worldKey(k);
   if (state.mode === 'update') return updateKey(k);
+  if (state.mode === 'admin') return adminKey(k);
   if (state.mode === 'install') return installKey(k);
   if (state.mode === 'wifi') return wifiKey(k);
   if (state.mode === 'displays') return displaysKey(k);
@@ -2277,6 +2358,7 @@ function tick() {
   else if (state.mode === 'settings') renderSettings(m, t);
   else if (state.mode === 'world') renderWorld(m, t);
   else if (state.mode === 'update') renderUpdate(m, t);
+  else if (state.mode === 'admin') renderAdmin(m, t);
   else if (state.mode === 'install') renderInstall(m, t);
   else if (state.mode === 'wifi') renderWifi(m, t);
   else if (state.mode === 'displays') renderDisplays(m, t);
@@ -2413,6 +2495,8 @@ async function main() {
   setInterval(() => { const n = Date.now(); perf.lagMax = Math.max(perf.lagMax, n - lagAt - 100); lagAt = n; }, 100); // how late a 100 ms timer fires
   setInterval(perfTick, 10000);
   setTimeout(updateLoop, 45000); // first check once the network is surely up
+  if (!IS_CHILD && !PNG_OUT) { try { admin.start(adminApi()); } catch (e) { log('admin start failed: ' + e.message); }
+    setInterval(() => { try { applySchedule(); } catch (e) { log('schedule: ' + e.message); } }, 15000); try { applySchedule(); } catch {} }
   if (__dirname === updater.UPDATE_DIR) setTimeout(() => updater.confirm(__dirname), 20000); // new version runs fine
 }
 

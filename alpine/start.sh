@@ -27,6 +27,9 @@ fi
 #    appears, which has exactly one screen; VirtualBox, for example, then greys out "Virtual screen 2" (it only enables extra
 #    screens for guests whose driver supports several outputs: vmwgfx on VMSVGA).
 for dev in /sys/bus/pci/devices/*; do
+  # VirtualBox guest device (VMMDev): vboxguest lets the host talk to the guest (mode hints, which is what unlocks
+  # "Virtual screen 2 > Enable"); the in-kernel vboxvideo driver of the VBoxVGA controller needs it
+  [ "$(cat "$dev/vendor" 2>/dev/null):$(cat "$dev/device" 2>/dev/null)" = "0x80ee:0xcafe" ] && modprobe -q vboxguest 2>/dev/null
   case "$(cat "$dev/class" 2>/dev/null)" in 0x03*) ;; *) continue ;; esac
   case "$(cat "$dev/vendor" 2>/dev/null):$(cat "$dev/device" 2>/dev/null)" in
     0x15ad:0x0405) m=vmwgfx ;;       # VMware / VirtualBox VMSVGA
