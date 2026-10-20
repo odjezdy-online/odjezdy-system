@@ -7,8 +7,10 @@ function fields(d, api) {
   const cat = rail ? String(d.category || (CAT.test(String(d.line)) ? d.line : '') || '').trim() : '';
   return {
     rail,
-    kind: rail ? cat || String(d.line ?? '') : String(d.line ?? ''),            // Os / R / Ex …, for buses the line number
-    num: rail && d.trainNumber ? String(d.trainNumber) : '',
+    line: String(d.line ?? ''),
+    // kind + number columns: Os / R / Ex + train number; buses: "Bus" (Tram, Tb, Metro) + the line number
+    kind: rail ? cat || String(d.line ?? '') : { tram: 'Tram', trolleybus: 'Tb', metro: 'Metro', subway: 'Metro', ferry: 'Přívoz' }[d.type] || 'Bus',
+    num: rail ? (d.trainNumber ? String(d.trainNumber) : '') : String(d.line ?? ''),
     op: rail ? d.operator || api.providerLabel(d) || '' : '',
     dest: String(d.destination || 'cíl neuveden'),
     dir: d.via?.length ? d.via[0] : '',                                           // "směr jízdy": the first stop on the way

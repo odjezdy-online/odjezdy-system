@@ -2,6 +2,10 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.13
+- Další vzhledy podle fotek nádražních tabulí: Praha hl.n. (velká modrá hala), Praha-Masarykovo (příjezdy), Gema Přeštice, Elen Děčín, Česká Třebová a Otrokovice
+- U autobusů a tramvají ve vzhledech nádražních tabulí je druh „Bus“/„Tram“ a číslo linky ve sloupci čísla
+
 ## 0.5.12
 - Nové vzhledy podle českých nádražních tabulí: Gema (hala), Elen (hala s LED body a tabule kolejí), Elektročas (nástupiště a hala Odjezd/Abfahrt), Elekon, SŽDC s hodinami, autobusy + vlaky
 - Obecné vzhledy podle normy SŽ SM118: SŽ tabule, LCD nádraží (světlé), LED nádraží (jantar)

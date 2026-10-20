@@ -34,7 +34,7 @@ module.exports = {
     const bs = unit(bx, 'ODJEZDY AUTOBUSŮ', 'BUS DEPARTURES', [['Linka', 38], ['Cílová stanice', 130], ['Odjezd', pw - 150, 'right'], ['Stán.', pw - 44, 'right']], buses, 'Dnes autobusy nejedou.');
     bs.forEach(({ f }, i) => {
       const y = top + 126 + Math.floor(i / 3) * (3 * rowH + 14) + (i % 3) * rowH + 40, col = f.cancelled ? K.red : K.white;
-      T(f.kind, bx + 70, y, 36, col, F.led, { align: 'right' }); T(f.dest, bx + 110, y, 36, col, F.led, { maxW: (pw - 110 - 200) * s });
+      T(f.line, bx + 70, y, 36, col, F.led, { align: 'right' }); T(f.dest, bx + 110, y, 36, col, F.led, { maxW: (pw - 110 - 200) * s });
       T(f.time, bx + pw - 150, y, 36, col, F.led, { align: 'right' }); T(f.plat, bx + pw - 44, y, 34, col, F.led, { align: 'right' });
     });
     const ts = unit(tx, 'ODJEZDY VLAKŮ', 'TRAIN DEPARTURES', [['Druh', 30], ['Číslo', 128, 'right'], ['Cílová stanice', 150], ['Odjezd', pw - 150, 'right'], ['Kolej', pw - 90, 'right'], ['Zpož.', pw - 30, 'right']], trains, state.lastOk ? 'Dnes vlaky nejedou.' : emptyText(state));
