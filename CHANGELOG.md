@@ -2,6 +2,12 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.14
+- Stejný vlak z PID a ČD/DÚK se ukáže jednou (číslo vlaku, nástupiště a zpoždění z ČD, označení linky z PID)
+- Mimořádnost nahradí odjezdy na celé obrazovce v barvách a písmu vzhledu
+- Související hlášení jen podle linky, s uvedením linek, kterých se týkají (už nevypadají jako výluka celé zastávky)
+- Klávesa V ukáže i paměť a dobu běhu tabule
+
 ## 0.5.13
 - Další vzhledy podle fotek nádražních tabulí: Praha hl.n. (velká modrá hala), Praha-Masarykovo (příjezdy), Gema Přeštice, Elen Děčín, Česká Třebová a Otrokovice
 - U autobusů a tramvají ve vzhledech nádražních tabulí je druh „Bus“/„Tram“ a číslo linky ve sloupci čísla
