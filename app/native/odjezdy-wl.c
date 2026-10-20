@@ -74,6 +74,8 @@ static struct wl_display *dpy;
 static struct wl_compositor *comp;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm;
+static struct wl_seat *seat;
+static struct wl_pointer *ptr;
 static struct output outs[MAX_OUT];
 static int nout;
 static struct client clients[MAX_CLIENT];
@@ -96,11 +98,26 @@ static const struct wl_output_listener out_l = { out_geometry, out_mode, out_don
 static void wm_ping(void *d, struct xdg_wm_base *b, uint32_t serial) { (void)d; xdg_wm_base_pong(b, serial); }
 static const struct xdg_wm_base_listener wm_l = { wm_ping };
 
+/* a board has no use for a mouse cursor: hide it whenever the pointer is over one of our windows */
+static void ptr_enter(void *d, struct wl_pointer *p, uint32_t serial, struct wl_surface *sf, wl_fixed_t x, wl_fixed_t y) { (void)d; (void)sf; (void)x; (void)y; wl_pointer_set_cursor(p, serial, NULL, 0, 0); }
+static void ptr_leave(void *d, struct wl_pointer *p, uint32_t serial, struct wl_surface *sf) { (void)d; (void)p; (void)serial; (void)sf; }
+static void ptr_motion(void *d, struct wl_pointer *p, uint32_t t, wl_fixed_t x, wl_fixed_t y) { (void)d; (void)p; (void)t; (void)x; (void)y; }
+static void ptr_button(void *d, struct wl_pointer *p, uint32_t serial, uint32_t t, uint32_t b, uint32_t st) { (void)d; (void)p; (void)serial; (void)t; (void)b; (void)st; }
+static void ptr_axis(void *d, struct wl_pointer *p, uint32_t t, uint32_t a, wl_fixed_t v) { (void)d; (void)p; (void)t; (void)a; (void)v; }
+static const struct wl_pointer_listener ptr_l = { .enter = ptr_enter, .leave = ptr_leave, .motion = ptr_motion, .button = ptr_button, .axis = ptr_axis };
+static void seat_caps(void *d, struct wl_seat *st, uint32_t caps) {
+  (void)d;
+  if ((caps & WL_SEAT_CAPABILITY_POINTER) && !ptr) { ptr = wl_seat_get_pointer(st); wl_pointer_add_listener(ptr, &ptr_l, NULL); }
+}
+static void seat_name(void *d, struct wl_seat *st, const char *n) { (void)d; (void)st; (void)n; }
+static const struct wl_seat_listener seat_l = { seat_caps, seat_name };
+
 static void reg_global(void *d, struct wl_registry *r, uint32_t id, const char *iface, uint32_t ver) {
   (void)d;
   if (!strcmp(iface, "wl_compositor")) comp = wl_registry_bind(r, id, &wl_compositor_interface, ver < 4 ? ver : 4);
   else if (!strcmp(iface, "wl_shm")) shm = wl_registry_bind(r, id, &wl_shm_interface, 1);
   else if (!strcmp(iface, "xdg_wm_base")) { wm = wl_registry_bind(r, id, &xdg_wm_base_interface, ver < 2 ? ver : 2); xdg_wm_base_add_listener(wm, &wm_l, NULL); }
+  else if (!strcmp(iface, "wl_seat") && !seat) { seat = wl_registry_bind(r, id, &wl_seat_interface, ver < 5 ? ver : 5); wl_seat_add_listener(seat, &seat_l, NULL); }
   else if (!strcmp(iface, "wl_output") && nout < MAX_OUT) {
     struct output *o = &outs[nout];
     memset(o, 0, sizeof *o);
