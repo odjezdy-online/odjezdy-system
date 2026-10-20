@@ -299,6 +299,13 @@ function onInput(type, code, value, absMax) {
   }
 }
 
+// first visible row of a scrolling menu: moves only when the selection leaves the window (a window computed from the
+// selection alone jumped on every mouse move: the row under the pointer changed, which moved the selection again)
+function scrollFirst(o, sel, rows, total) {
+  let f = o.scrollFirst || 0;
+  if (sel < f) f = sel; else if (sel >= f + rows) f = sel - rows + 1;
+  return (o.scrollFirst = Math.min(Math.max(0, f), Math.max(0, total - rows)));
+}
 function moved() {
   pointer.visible = true;
   pointer.last = Date.now();
@@ -1369,7 +1376,7 @@ function renderBrowse(m, t) {
   const items = browseVisible();
   const rows = browseMaxRows(m);
   b.sel = Math.max(0, Math.min(b.sel, items.length - 1));
-  const first = Math.min(Math.max(0, b.sel - rows + 1), Math.max(0, items.length - rows));
+  const first = scrollFirst(b, b.sel, rows, items.length);
   const y0 = fy + L.rowH + 2;
   if (!items.length) m.text('Nic neodpovídá filtru', 9, y0, 'normal', C.RED);
   items.slice(first, first + rows).forEach((it, i) => {
@@ -1545,7 +1552,7 @@ function renderStart(m, t) {
   m.textRight(hhmm(now), W - 2, 1, 'big', C.AMBER);
   m.hline(0, W - 1, L.headerLine, C.DIM);
   const vis = startVisible(m);
-  const first = Math.min(Math.max(0, st.sel - vis + 1), Math.max(0, st.items.length - vis));
+  const first = scrollFirst(st, st.sel, vis, st.items.length);
   st.items.slice(first, first + vis).forEach((it, i) => {
     const idx = first + i, y = L.headerLine + 5 + i * L.rowH, on = idx === st.sel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
@@ -1826,7 +1833,7 @@ function renderInstall(m, t) {
     if (st.step === 'keymap') { m.text(fitText('Zkus si psát: ' + (st.filter || '…') + cursor, 'small', W - 4), 2, y, 'small', C.DIM); y += L.sm + 5; }
     const list = installList(st);
     const rows = Math.max(1, Math.floor((m.rows - y - L.sm * 2 - 10) / L.rowH));
-    const first = Math.min(Math.max(0, st.sel - rows + 1), Math.max(0, list.length - rows));
+    const first = scrollFirst(st, st.sel, rows, list.length);
     list.slice(first, first + rows).forEach((it, k) => {
       const i = first + k, yy = y + k * L.rowH, on = i === st.sel;
       if (on) m.text('>', 2, yy, 'normal', C.WHITE);
@@ -1988,7 +1995,7 @@ function renderWifi(m, t) {
   if (!w.nets) m.text(w.scanning ? 'Hledám sítě…' : '', 2, y, 'normal', C.DIM);
   else if (!w.nets.length) m.text('Žádná síť v dosahu', 2, y, 'normal', C.DIM);
   const rows = Math.max(1, Math.floor((m.rows - y - L.sm - 6) / L.rowH));
-  const first = Math.min(Math.max(0, w.sel - rows + 1), Math.max(0, (w.nets?.length || 0) - rows));
+  const first = scrollFirst(w, w.sel, rows, w.nets?.length || 0);
   (w.nets || []).slice(first, first + rows).forEach((n, k) => {
     const i = first + k, yy = y + k * L.rowH, on = i === w.sel;
     if (on) m.text('>', 2, yy, 'normal', C.WHITE);
@@ -2048,7 +2055,7 @@ function renderThemes(m, t) {
   m.textRight(`${state.themeSel + 1} z ${THEMES.length}`, W - 2, 3, 'small', C.DIM);
   m.hline(0, W - 1, L.headerLine, C.DIM);
   const y0 = L.headerLine + 4, rows = Math.max(1, Math.floor((m.rows - y0 - L.sm - 6) / L.rowH));
-  const first = Math.min(Math.max(0, state.themeSel - Math.floor(rows / 2)), Math.max(0, THEMES.length - rows));
+  const first = scrollFirst(state, state.themeSel, rows, THEMES.length);
   THEMES.slice(first, first + rows).forEach((th, k) => {
     const i = first + k, y = y0 + k * L.rowH, on = i === state.themeSel;
     if (on) m.text('>', 2, y, 'normal', C.WHITE);
