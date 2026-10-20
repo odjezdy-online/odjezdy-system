@@ -2,6 +2,12 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.16
+- Správa na dálku: webová stránka na portu 8080 s heslem (stav, zastávka, vzhled, jas, restart, aktualizace, záznam); adresa a heslo jsou v menu „Správa na dálku (web)…“
+- Plán zapnutí a jasu: pravidla podle dnů a času, jas 0 = zhasnuto
+- Vzhled DB: berlínské barvy linek S-Bahn a U-Bahn, štítky RB/RE/ICE, symboly U-Bahn a tramvaje
+- Živé ISO načte i ovladač VirtualBoxu (vboxguest) kvůli více monitorům
+
 ## 0.5.15
 - Vzhled DB blíž stránce bahnhof.de (barvy, šířka, symboly ve filtru, čipy „i“ a Fahrtinformationen)
 - Živé ISO si před startem tabule načte ovladač grafické karty (kvůli více monitorům ve VirtualBoxu)
