@@ -48,7 +48,7 @@ python3 "$HERE/qmp.py" "$QMP" key alt+f2; sleep 3
 # the live default keymap is cz (QWERTZ) and qmp.py types US key positions: switch with a command
 # that survives that (the Y key position produces "z" on cz, hence the odd spelling)
 python3 "$HERE/qmp.py" "$QMP" type 'loadkezs us\n'; sleep 2
-python3 "$HERE/qmp.py" "$QMP" type 'odjezdy-install --json --disk /dev/vda --yes --root-password test --desktop $DESKTOP > /dev/ttyS0 2>&1; echo INSTALL-EXIT-$? > /dev/ttyS0\n'
+python3 "$HERE/qmp.py" "$QMP" type "odjezdy-install --json --disk /dev/vda --yes --root-password test --desktop $DESKTOP > /dev/ttyS0 2>&1; echo INSTALL-EXIT-\$? > /dev/ttyS0\n"
 wait_for 'INSTALL-EXIT-' $((900 * K)) || { echo "FAIL: installer did not finish"; tail -c 2000 "$SER" | tr -d '\000'; exit 1; }
 kill "$QPID"; wait "$QPID" 2>/dev/null || true
 
