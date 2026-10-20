@@ -103,7 +103,7 @@ module.exports = {
       for (let k = 0; k < 10; k++) c.rect(ax + 12 * s + k * s, mid - (10 - k) * s * 0.9, 2.2 * s, (10 - k) * 1.8 * s, K.grey);
       // destination (+ "přes" stop in small print below)
       const cancelled = !!d.cancelled, dest = String(d.destination || 'cíl neuveden');
-      const via = d.via?.length ? d.via.slice(0, 3).join(' – ') : '';
+      const via = [api.trainTag(d), d.via?.length ? d.via.slice(0, 3).join(' – ') : ''].filter(Boolean).join(' · ');
       const dy = via ? mid + 6 * s : mid + 15 * s, dmax = platCx - platW / 2 - 30 * s - X.dest;
       T(dest, X.dest, dy, 43, cancelled ? K.red : K.white, { font: F.semi, maxW: dmax });
       if (cancelled) c.rect(X.dest, dy - 14 * s, Math.min(c.measure(dest, F.semi, 43 * s), dmax), 4 * s, K.red);

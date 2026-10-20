@@ -61,7 +61,7 @@ module.exports = {
       const bad = d.cancelled || d.delayMinutes >= 5, fill = bad ? K.red : K.plate;
       const n = depNotice(d);
       plate(...X.kam, y, h, fill, String(d.destination || '').toUpperCase(), 40, K.white);
-      const via = d.cancelled ? 'ZRUŠENO' : n ? n.text : d.via?.length ? d.via.slice(0, 3).join(' – ') : '';
+      const via = d.cancelled ? 'ZRUŠENO' : n ? n.text : [api.trainTag(d), d.via?.length ? d.via.slice(0, 3).join(' – ') : ''].filter(Boolean).join(' · ');
       plate(...X.pres, y, h, fill, via.toUpperCase(), 25, bad ? K.white : [214, 218, 232]);
       const cat = rail(d) ? (d.category || d.line || '') : ({ bus: 'Bus', tram: 'Tram', trolleybus: 'Tb', metro: 'Metro' }[d.type] || '') + ' ' + (d.line ?? '');
       plate(...X.druh, y, h, K.plate, String(cat).trim(), 36, /^(EC|IC|EN|SC|RJ|LE)$/i.test(cat) ? K.yellow : K.white, { align: 'center' });

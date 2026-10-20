@@ -1106,7 +1106,7 @@ const minutesTo = (d) => Math.round((depTime(d) - Date.now()) / 60000);
 const platformOf = (d) => {
   if (!d.platform || /^(N\/A|Neznámé|unknown)$/i.test(d.platform)) return '';
   // rail data says "Nástupiště 3" / "kolej 5"; boards only show the number
-  return String(d.platform).replace(/^(nástupiště|nást\.?|kolej|kol\.?|k\.)\s*/i, '').trim(); // "Kol. 12" -> "12"
+  return String(d.platform).replace(/^(nástupiště|nást\.?|kolej|kol\.?|k\.)\s*/i, '').replace(/\s*\/.*$/, '').trim(); // "Kol. 12" -> "12", "3 / kolej 2" -> "3"
 };
 const upcoming = () => state.deps.filter((d) => depTime(d) > Date.now() - 30000);
 function statusText() {
@@ -1194,9 +1194,11 @@ const providerLabel = (d) => (d.provider in PROVIDER_LABEL ? PROVIDER_LABEL[d.pr
 const TRAIN = '\uE000';
 const isRailRow = (d) => d.type === 'train' || d.type === 'rail';
 const platMark = (d) => platformOf(d) || (isRailRow(d) ? TRAIN : '');
+// train number as small print: "Os 6920" when the line is only a category, "č. 244" next to a numbered line (U3, R15)
+const trainTag = (d) => (isRailRow(d) && d.trainNumber ? (/^[A-Za-z]{1,3}$/.test(String(d.line || '').trim()) ? `${String(d.line).trim()} ${d.trainNumber}` : `č. ${d.trainNumber}`) : '');
 const platLabel = (d, prefix = '') => { const p = platformOf(d); return p ? prefix + p : isRailRow(d) ? TRAIN : ''; };
 const themeApi = {
-  platMark, platLabel,
+  platMark, platLabel, trainTag,
   providerLabel,
   vector: () => vector,
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,

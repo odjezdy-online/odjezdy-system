@@ -98,6 +98,7 @@ module.exports = {
       const pw = plat ? textWidth(plat, 'small') + 5 : 0;
       const destMax = colIn - minW - dw - pw - colDest - 4;
       m.text(fitText(d.destination || '', 'normal', destMax), colDest, y, 'normal', C.AMBER);
+      { const tg = api.trainTag(d), dx = colDest + textWidth(d.destination || '', 'normal') + 6; if (tg && dx + textWidth(tg, 'small') <= colDest + destMax) m.text(tg, dx, y + 1, 'small', C.DIM); }
       if (plat) m.text(plat, colIn - minW - dw - pw + 1, y, 'small', C.DIM);
       if (delayStr) m.text(delayStr, colIn - minW - dw + 1, y, 'small', delay >= 5 ? C.RED : C.DIM);
       m.textRight(right, colIn, midRow, 'normal', mins <= 0 ? C.WHITE : C.AMBER);

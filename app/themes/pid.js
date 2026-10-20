@@ -79,6 +79,8 @@ module.exports = {
       else T(String(d.line ?? ''), routeR, base, 65, K.white, { align: 'right', maxW: 160 * s });
       if (lfOf(d) === true && ICON.accessible) c.svg(ICON.accessible, routeR + 20 * s, y0 + rowH / 2 - 25 * s, 50 * s, 50 * s, { color: K.white });
       if (acOf(d) === true && ICON.snowflake) c.svg(ICON.snowflake, routeR + lfW + 10 * s, y0 + rowH / 2 - 25 * s, 50 * s, 50 * s, { color: K.white });
+      const tag = api.trainTag(d);
+      if (tag) T(tag, routeR, y0 + rowH - 12 * s, 24, K.grey, { font: F.reg, align: 'right', maxW: 160 * s });
       const dest = String(d.destination || 'cíl neuveden');
       const dw = Math.min(c.measure(dest, F.semi, 65 * s), headR - headX - (d.cancelled ? 190 * s : 0));
       T(dest, headX, base, 65, K.white, { maxW: headR - headX - (d.cancelled ? 190 * s : 0) });

@@ -31,6 +31,7 @@ function simpleLed(m, t, api, { title } = {}) {
     if (plat) m.textRight(plat, W - 4 - timeW, y + 1, 'small', C.DIM);
     const destMax = W - 2 - timeW - pw - lineW - 8;
     m.text(fitText(d.destination || '', 'normal', destMax), lineW + 4, y, 'normal', C.AMBER);
+    { const tg = api.trainTag(d), dx = lineW + 4 + textWidth(d.destination || '', 'normal') + 6; if (tg && dx + textWidth(tg, 'small') <= lineW + 4 + destMax) m.text(tg, dx, y + 1, 'small', C.DIM); }
     const n = depNotice(d);
     if (n) marquee(m, api, n.text, lineW + 4, lineW + 4 + destMax, y + nor + 1, 'small', C.RED, t);
     else if (api.hasDelay(d)) m.text(api.delayLabel(d), lineW + 4, y + nor + 1, 'small', api.delayColor(d));
