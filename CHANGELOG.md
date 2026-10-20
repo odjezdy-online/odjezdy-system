@@ -2,6 +2,10 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.15
+- Vzhled DB blíž stránce bahnhof.de (barvy, šířka, symboly ve filtru, čipy „i“ a Fahrtinformationen)
+- Živé ISO si před startem tabule načte ovladač grafické karty (kvůli více monitorům ve VirtualBoxu)
+
 ## 0.5.14
 - Stejný vlak z PID a ČD/DÚK se ukáže jednou (číslo vlaku, nástupiště a zpoždění z ČD, označení linky z PID)
 - Mimořádnost nahradí odjezdy na celé obrazovce v barvách a písmu vzhledu
