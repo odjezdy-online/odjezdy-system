@@ -374,7 +374,7 @@ C
   fi
   [ "$NVIDIA" -eq 0 ] || echo 'options nvidia_drm modeset=1 fbdev=1' > /mnt/etc/modprobe.d/nvidia-odjezdy.conf
   # a regular account for the desktop (display managers refuse root), same password as root
-  arch-chroot /mnt useradd -m -G wheel -s /bin/bash odjezdy
+  arch-chroot /mnt useradd -m -G wheel,input,video -s /bin/bash odjezdy
   install -Dm440 /dev/stdin /mnt/etc/sudoers.d/10-wheel <<'C'
 %wheel ALL=(ALL:ALL) ALL
 C
