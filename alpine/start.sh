@@ -23,7 +23,23 @@ if ! command -v node >/dev/null 2>&1; then
   fi
 fi
 
-# 2) graphics: wait for a framebuffer (DRM drivers are loaded by mdev/hwdrivers)
+# 2) graphics: load the real DRM driver of the GPU first. Without it the generic framebuffer (efifb/simpledrm/vesafb)
+#    appears, which has exactly one screen; VirtualBox, for example, then greys out "Virtual screen 2" (it only enables extra
+#    screens for guests whose driver supports several outputs: vmwgfx on VMSVGA).
+for dev in /sys/bus/pci/devices/*; do
+  case "$(cat "$dev/class" 2>/dev/null)" in 0x03*) ;; *) continue ;; esac
+  case "$(cat "$dev/vendor" 2>/dev/null):$(cat "$dev/device" 2>/dev/null)" in
+    0x15ad:0x0405) m=vmwgfx ;;       # VMware / VirtualBox VMSVGA
+    0x80ee:0xbeef) m=vboxvideo ;;    # VirtualBox VBoxVGA
+    0x1af4:*)      m=virtio-gpu ;;   # QEMU/KVM virtio
+    0x1234:0x1111) m=bochs ;;        # QEMU std VGA
+    0x1b36:0x0100) m=qxl ;;
+    0x1414:*)      m=hyperv_drm ;;   # Hyper-V
+    *)             m="" ;;
+  esac
+  [ -n "$m" ] && modprobe -q "$m" 2>/dev/null
+done
+# wait for a framebuffer (DRM drivers are loaded by mdev/hwdrivers)
 i=0
 while [ ! -e /dev/fb0 ] && [ $i -lt 20 ]; do
   [ $i -eq 3 ] && for m in bochs virtio-gpu vmwgfx hyperv_drm qxl cirrus-qemu simpledrm vboxvideo; do modprobe -q "$m" 2>/dev/null; done

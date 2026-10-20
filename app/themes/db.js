@@ -129,11 +129,12 @@ function typeName(type) {
 
 // ---------------------------------------------------------------- native (vector) version, like bahnhof.de "Abfahrt"
 const N = {
-  bg: [24, 31, 104], bar: [46, 58, 150], white: [255, 255, 255], dim: [176, 186, 228], line: [120, 132, 200],
+  bg: [25, 33, 118], bar: [40, 58, 151], chip: [19, 25, 91], white: [255, 255, 255], dim: [176, 186, 228], line: [120, 132, 200],
   sbahn: [64, 140, 58], grey: [98, 102, 116], red: [236, 0, 22], yellow: [255, 216, 0], ink: [20, 24, 70],
   bus: [196, 35, 120], tram: [204, 0, 0], metro: [0, 92, 170],
 };
 const F = { reg: 'FiraSans-Regular', semi: 'FiraSans-SemiBold', bold: 'FiraSans-Bold' };
+const TRAIN = '\uE000';
 const KINDS = [['Fern', /^(ICE|IC|EC|EN|NJ|RJ|rj|RJX|SC|Ex|LE|ES)\b/], ['Regio', /^(R|RE|RB|Os|Sp|IRE|U\d|L\d)/], ['S-Bahn', /^S\s?\d/]];
 
 function pill(c, x, yTop, label, bg, fg, s, size = 17, radius = 999) {
@@ -146,7 +147,7 @@ function pill(c, x, yTop, label, bg, fg, s, size = 17, radius = 999) {
 function nativeRender(c, t, api) {
   const { state, hhmm, depTime, platformOf, depNotice, stopLabel } = api;
   const s = Math.min(c.w / 1280, c.h / 720), W = c.w;
-  const x0 = Math.max(40 * s, (W - 1400 * s) / 2), x1 = W - x0;
+  const x0 = Math.max(24 * s, (W - 960 * s) / 2), x1 = W - x0;
   c.clear(N.bg);
 
   // header: station, big "Abfahrt", clock
@@ -163,8 +164,15 @@ function nativeRender(c, t, api) {
   const kinds = new Set(deps.map((d) => kindOf(d)));
   for (const k of ['Fern', 'Regio', 'S-Bahn', 'U-Bahn', 'Tram', 'Bus', 'Fähre']) {
     if (!kinds.has(k)) continue;
-    c.text(k, bx, 156 * s, { font: F.semi, size: 18 * s, color: N.white });
-    bx += c.measure(k, F.semi, 18 * s) + 26 * s;
+    const ic = { Fern: [[255, 205, 0], N.ink, TRAIN], Regio: [[0, 128, 120], N.white, 'R'], 'S-Bahn': [[64, 140, 58], N.white, 'S'], Bus: [[196, 35, 120], N.white, 'BUS'], Fähre: [[40, 120, 220], N.white, 'E'] }[k];
+    if (ic) {
+      const d0 = 22 * s;
+      c.roundRect(bx, 138 * s, d0, d0, k === 'Fähre' ? 3 * s : d0 / 2, ic[0]);
+      c.text(ic[2], bx + d0 / 2, 138 * s + d0 * (ic[2] === 'BUS' ? 0.66 : 0.74), { font: F.bold, size: (ic[2] === 'BUS' ? 9 : 15) * s, color: ic[1], align: 'center' });
+      bx += d0 + 8 * s;
+    }
+    c.text(k, bx, 156 * s, { font: F.semi, size: 17 * s, color: N.white });
+    bx += c.measure(k, F.semi, 17 * s) + 28 * s;
   }
 
   if (!deps.length) {
@@ -175,7 +183,7 @@ function nativeRender(c, t, api) {
   const rail = deps.slice(0, 20).filter((d) => d.type === 'train' || d.type === 'rail').length >= Math.min(deps.length, 20) / 2;
 
   // column heads
-  const colL = x0 + 210 * s, colM = colL + 30 * s, colG = x1, midEnd = x1 - 120 * s;
+  const colL = x0 + 155 * s, colM = x0 + 190 * s, colG = x1, midEnd = x1 - 100 * s;
   const hy = 206 * s;
   c.text(rail ? 'Zug / Bus' : 'Linie', colL, hy, { font: F.semi, size: 15 * s, color: N.white, align: 'right' });
   c.text(rail ? 'Zeit' : '', colL, hy + 20 * s, { font: F.semi, size: 15 * s, color: N.white, align: 'right' });
@@ -185,7 +193,7 @@ function nativeRender(c, t, api) {
   const lineY = hy + 30 * s;
   c.hline(x0, colL, lineY, N.white, Math.max(1, 2 * s)); c.hline(colM, midEnd, lineY, N.white, Math.max(1, 2 * s)); c.hline(midEnd + 14 * s, colG, lineY, N.white, Math.max(1, 2 * s));
 
-  const top = lineY + 16 * s, rowH = (rail ? 96 : 70) * s;
+  const top = lineY + 16 * s, rowH = (rail ? 108 : 70) * s;
   const per = Math.max(1, Math.floor((c.h - top - 30 * s) / rowH));
   const pages = pageCount(Math.max(1, Math.ceil(Math.min(deps.length, per * 4) / per)));
   const page = pageAt(t, 8000, pages);
@@ -199,17 +207,17 @@ function nativeRender(c, t, api) {
       const label = d.train || String(d.line);
       const sb = /^S\s?\d/.test(String(d.line));
       const bw = c.measure(label, F.bold, 15 * s) + 14 * s;
-      pill(c, colL - bw, y + 6 * s, label, sb ? N.sbahn : N.grey, N.white, s, 15, sb ? 999 : 3);
+      pill(c, colL - bw, y + 14 * s, label, sb ? N.sbahn : N.grey, N.white, s, 15, sb ? 999 : 3);
       const planned = hhmm(new Date(d.plannedTime));
       let tx = colL;
       if (d.delayMinutes > 0) {
         const exp = hhmm(new Date(depTime(d)));
         const ew = c.measure(exp, F.semi, 16 * s) + 10 * s;
-        c.rect(colL - ew, y + 44 * s, ew, 24 * s, N.white);
-        c.text(exp, colL - ew / 2, y + 62 * s, { font: F.semi, size: 16 * s, color: N.ink, align: 'center' });
+        c.rect(colL - ew, y + 60 * s, ew, 24 * s, N.white);
+        c.text(exp, colL - ew / 2, y + 78 * s, { font: F.semi, size: 16 * s, color: N.ink, align: 'center' });
         tx = colL - ew - 8 * s;
       }
-      c.text(planned, tx, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, align: 'right' });
+      c.text(planned, tx, y + 82 * s, { font: F.semi, size: 28 * s, color: d.cancelled ? N.red : N.white, align: 'right' });
       // "über" line, destination, platform
       const over = n ? n.text : d.via?.length ? d.via.slice(0, 5).join(' – ') : '';
       // operator (ČD, DÚK, PID …) is its own cell at the right end of the Über line, not part of the stop list
@@ -218,10 +226,16 @@ function nativeRender(c, t, api) {
         c.roundRect(midEnd - opW, y + 14 * s, opW, 22 * s, 4 * s, N.line);
         c.text(api.providerLabel(d), midEnd - opW / 2, y + 30 * s, { font: F.semi, size: 14 * s, color: N.white, align: 'center' });
       }
-      c.text(over, colM, y + 30 * s, { font: n ? F.semi : F.reg, size: 16 * s, color: n ? N.yellow : N.dim, maxW: midEnd - colM - opW - 10 * s });
-      c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 10 * s });
+      // chips row: "i" when the train has information (notice / delay), as on the page
+      if (n || d.delayMinutes > 0 || d.cancelled) { c.roundRect(colM, y + 8 * s, 20 * s, 20 * s, 2 * s, N.white); c.text('i', colM + 10 * s, y + 24 * s, { font: F.bold, size: 15 * s, color: N.ink, align: 'center' }); }
+      const ov = c.fit(over, F.semi, 14 * s, midEnd - colM - opW - 36 * s), cut = ov !== over;
+      c.text(ov, colM, y + 50 * s, { font: n ? F.semi : F.semi, size: 14 * s, color: n ? N.yellow : N.white });
+      if (cut) { const cx = colM + c.measure(ov, F.semi, 14 * s) + 6 * s; c.roundRect(cx, y + 36 * s, 26 * s, 18 * s, 3 * s, N.chip); c.text('…', cx + 13 * s, y + 47 * s, { font: F.bold, size: 14 * s, color: N.white, align: 'center' }); }
+      c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 82 * s, { font: F.semi, size: 28 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 130 * s });
+      const info = n || d.delayMinutes > 0 || d.cancelled ? 'Fahrtinformationen' : '';
+      if (info) { const iw = c.measure(info, F.semi, 12 * s) + 14 * s; c.roundRect(midEnd - iw, y + 62 * s, iw, 22 * s, 3 * s, N.chip); c.text(info, midEnd - iw / 2, y + 77 * s, { font: F.semi, size: 12 * s, color: N.white, align: 'center' }); }
       const plat = api.platMark(d);
-      if (plat) c.text(plat, colG, y + 66 * s, { font: F.semi, size: 30 * s, color: N.white, align: 'right' });
+      if (plat) c.text(plat, colG, y + 82 * s, { font: F.semi, size: 28 * s, color: N.white, align: 'right' });
       const uy = y + rowH - 12 * s;
       c.hline(x0, colL, uy, N.white); c.hline(colM, midEnd, uy, N.white); c.hline(midEnd + 14 * s, colG, uy, N.white);
     } else {
