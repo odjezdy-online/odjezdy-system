@@ -75,6 +75,17 @@ jobs:
           for f in app/*.js app/themes/*.js; do node --check "$f"; done
           node app/board.js --png /tmp/smoke.png --theme buse
 
+      - name: Native KMS helper (static: runs on Alpine and Arch, in the app bundle and in the Alpine ISO)
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libdrm-dev
+          if gcc -O2 -Wall -static -o app/native/odjezdy-kms app/native/odjezdy-kms.c $(pkg-config --cflags --libs libdrm); then
+            strip app/native/odjezdy-kms; ls -la app/native/odjezdy-kms
+          else
+            echo "::warning::static odjezdy-kms build failed, the release goes without it (single display / fbdev only)"
+            rm -f app/native/odjezdy-kms
+          fi
+
       - name: App update bundle
         if: steps.v.outputs.skip != 'true'
         run: |

@@ -2,6 +2,12 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.17
+- Změna velikosti okna virtuálního počítače (např. na 1920×1080) se teď projeví: tabule si při změně preferovaného rozlišení restartuje a nastaví ho sama
+- Natvrdo přeložený pomocník pro režim obrazovky je součástí balíčku aplikace i živého ISO (Alpine)
+- JR a LED jantar: hustší řádky, víc odjezdů na obrazovce
+- Wayland: při změně velikosti okna tabule nekončí, ale pokračuje s novou obrazovkou; důvody ukončení se zapisují do záznamu
+
 ## 0.5.16
 - Správa na dálku: webová stránka na portu 8080 s heslem (stav, zastávka, vzhled, jas, restart, aktualizace, záznam); adresa a heslo jsou v menu „Správa na dálku (web)…“
 - Plán zapnutí a jasu: pravidla podle dnů a času, jas 0 = zhasnuto

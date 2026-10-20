@@ -2448,7 +2448,7 @@ async function setupOutputs() {
   if (PNG_OUT) return null;
   if (IS_CHILD) return OUTPUT.startsWith('kms:') ? displays.kmsConnect(Number(OUTPUT.slice(4))) : OUTPUT.startsWith('wl:') ? displays.wlConnect(Number(OUTPUT.slice(3))) : null;
   const d = displays.detect();
-  log(`displays: ${d.mode}${d.connectors ? ' (' + d.connectors.join(', ') + ')' : ''}`);
+  log(`displays: ${d.mode}${d.connectors ? ' (' + d.connectors.join(', ') + ')' : ''}${d.resize ? ', mode change ' + d.resize : ''}`);
   if (d.mode === 'fb') {
     state.displays = d.outputs.map((o, i) => ({ ...o, index: i }));
     OUTPUT = state.displays[0].dev;
@@ -2585,6 +2585,14 @@ async function main() {
   setInterval(() => { const n = Date.now(); perf.lagMax = Math.max(perf.lagMax, n - lagAt - 100); lagAt = n; }, 100); // how late a 100 ms timer fires
   setInterval(perfTick, 10000);
   setTimeout(updateLoop, 45000); // first check once the network is surely up
+  if (!IS_CHILD && !PNG_OUT) {
+    const pref0 = displays.preferredMode(), upAt = Date.now();
+    if (pref0) setInterval(() => {
+      if (Date.now() - upAt < 15000) return;
+      const p = displays.preferredMode();
+      if (p && p !== pref0) { log(`preferred display mode changed (${pref0} -> ${p}), restarting the board`); shutdown(0); }
+    }, 2000);
+  }
   if (!IS_CHILD && !PNG_OUT) { try { admin.start(adminApi()); } catch (e) { log('admin start failed: ' + e.message); }
     setInterval(() => { try { applySchedule(); } catch (e) { log('schedule: ' + e.message); } }, 15000); try { applySchedule(); } catch {} }
   if (__dirname === updater.UPDATE_DIR) setTimeout(() => updater.confirm(__dirname), 20000); // new version runs fine

@@ -32,6 +32,27 @@ function framebuffers() {
   try { return fs.readdirSync('/dev').filter((d) => /^fb\d+$/.test(d)).sort((a, b) => a.slice(2) - b.slice(2)); } catch { return []; }
 }
 
+// preferred mode ("1920x1080") of the first connected connector: what the monitor / the VM host asks for. In a VM the host
+// changes it when the window is resized.
+function preferredMode() {
+  try {
+    for (const d of fs.readdirSync('/sys/class/drm').filter((x) => /^card\d+-/.test(x)).sort()) {
+      if (fs.readFileSync(`/sys/class/drm/${d}/status`, 'utf8').trim() !== 'connected') continue;
+      const m = fs.readFileSync(`/sys/class/drm/${d}/modes`, 'utf8').split('\n')[0].trim();
+      if (/^\d+x\d+/.test(m)) return m;
+    }
+  } catch {}
+  return null;
+}
+// size of the framebuffer the kernel gave us ("1280x720")
+function fbSize(dev = 'fb0') {
+  try { // the visible mode ("U:1280x720p-0"); virtual_size may be taller (virtual screens)
+    const m = /(\d+)x(\d+)/.exec(fs.readFileSync(`/sys/class/graphics/${dev}/modes`, 'utf8'));
+    if (m) return `${m[1]}x${m[2]}`;
+  } catch {}
+  try { return fs.readFileSync(`/sys/class/graphics/${dev}/virtual_size`, 'utf8').trim().replace(',', 'x'); } catch { return null; }
+}
+
 // what this machine has; ODJEZDY_DISPLAYS=off forces a single display
 function detect() {
   if (process.env.ODJEZDY_DISPLAYS === 'off') return { mode: 'single' };
@@ -40,6 +61,10 @@ function detect() {
   const conns = connectedConnectors(), fbs = framebuffers();
   if (fbs.length > 1) return { mode: 'fb', outputs: fbs.map((f) => ({ type: 'fb', dev: f, name: f })) };
   if (conns.length > 1 && KMS_BIN()) return { mode: 'kms', connectors: conns };
+  // one output whose preferred mode is not what the framebuffer has (VM window resized, monitor with a native size the console
+  // did not pick): the kernel's fbdev cannot change size, the KMS helper sets the preferred mode itself
+  const pm = preferredMode(), fz = fbSize();
+  if (conns.length === 1 && KMS_BIN() && pm && fz && pm !== fz && process.env.ODJEZDY_NO_MODESET !== '1') return { mode: 'kms', connectors: conns, resize: `${fz} -> ${pm}` };
   return { mode: 'single', connectors: conns };
 }
 
@@ -123,4 +148,4 @@ let stopping = false;
 function stopChildren() { stopping = true; for (const c of children.values()) try { c.kill('SIGTERM'); } catch {} }
 function reloadChild(n) { try { children.get(n)?.kill('SIGHUP'); } catch {} }
 
-module.exports = { detect, startKms, kmsConnect, wlList, wlConnect, startChildren, stopChildren, reloadChild, displayConfig, framebuffers };
+module.exports = { preferredMode, fbSize, detect, startKms, kmsConnect, wlList, wlConnect, startChildren, stopChildren, reloadChild, displayConfig, framebuffers };

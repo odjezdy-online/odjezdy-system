@@ -167,7 +167,7 @@ function buildApkovl() {
   for (const f of walk(APP)) {
     const rel = f.rel.split(path.sep).join('/');
     if (f.type === 'dir') addDir(`opt/odjezdy/${rel}`);
-    else addFile(`opt/odjezdy/${rel}`, fs.readFileSync(f.full));
+    else addFile(`opt/odjezdy/${rel}`, fs.readFileSync(f.full), /^native\/odjezdy-(kms|wl)$/.test(rel) ? 0o755 : 0o644); // native helpers must be executable
   }
   addFile('opt/odjezdy/start.sh', fs.readFileSync(path.join(ROOT, 'start.sh')), 0o755);
   addFile('opt/odjezdy/config.json', JSON.stringify({ stop: { name: STOP, ids: [] }, favorites: [] }, null, 2) + '\n');
