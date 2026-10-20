@@ -15,6 +15,8 @@ const net = require('net');
 const { spawn } = require('child_process');
 
 const SOCK = process.env.ODJEZDY_KMS_SOCK || '/run/odjezdy-kms.sock';
+// Wayland: native/odjezdy-wl (started by odjezdy-board-wl under cage / in a desktop session) speaks the same protocol as odjezdy-kms
+const WL_SOCK = process.env.ODJEZDY_WL_SOCK || path.join(process.env.XDG_RUNTIME_DIR || '/run/user/0', 'odjezdy-wl.sock');
 const KMS_BIN = () => [process.env.ODJEZDY_KMS, '/usr/lib/odjezdy/odjezdy-kms', path.join(__dirname, 'native', 'odjezdy-kms')]
   .find((p) => { try { return p && (fs.accessSync(p, fs.constants.X_OK), true); } catch { return false; } }) || null;
 const displayConfig = (n) => path.join(path.dirname(process.env.ODJEZDY_CONFIG || '/etc/odjezdy/config.json'), `display-${n}.json`);
@@ -34,6 +36,7 @@ function framebuffers() {
 function detect() {
   if (process.env.ODJEZDY_DISPLAYS === 'off') return { mode: 'single' };
   if (process.env.ODJEZDY_DISPLAYS === 'kms' && KMS_BIN()) return { mode: 'kms', connectors: connectedConnectors() }; // force (testing)
+  if (process.env.ODJEZDY_WL_SOCK || fs.existsSync(WL_SOCK)) return { mode: 'wl' };
   const conns = connectedConnectors(), fbs = framebuffers();
   if (fbs.length > 1) return { mode: 'fb', outputs: fbs.map((f) => ({ type: 'fb', dev: f, name: f })) };
   if (conns.length > 1 && KMS_BIN()) return { mode: 'kms', connectors: conns };
@@ -55,9 +58,9 @@ function startKms() {
     });
   });
 }
-function kmsList() {
+function kmsList(sock = SOCK, type = 'kms') {
   return new Promise((resolve, reject) => {
-    const s = net.createConnection(SOCK, () => s.write('LIST\n'));
+    const s = net.createConnection(sock, () => s.write('LIST\n'));
     let buf = '';
     s.on('data', (d) => {
       buf += d;
@@ -65,16 +68,16 @@ function kmsList() {
       s.end();
       resolve(buf.split('\n').filter((l) => l.startsWith('OUT ')).map((l) => {
         const [, n, w, h, stride, name] = l.split(' ');
-        return { type: 'kms', n: +n, w: +w, h: +h, stride: +stride, name };
+        return { type, n: +n, w: +w, h: +h, stride: +stride, name };
       }));
     });
     s.on('error', reject);
   });
 }
 // connect a board to output n: { type:'kms', n, w, h, stride, sock }
-function kmsConnect(n) {
+function kmsConnect(n, sock = SOCK, type = 'kms') {
   return new Promise((resolve, reject) => {
-    const s = net.createConnection(SOCK, () => s.write(`OUT ${n}\n`));
+    const s = net.createConnection(sock, () => s.write(`OUT ${n}\n`));
     let buf = '';
     const onData = (d) => {
       buf += d;
@@ -83,12 +86,22 @@ function kmsConnect(n) {
       s.off('data', onData);
       const [ok, w, h, stride] = buf.slice(0, i).split(' ');
       if (ok !== 'OK') return reject(new Error(buf.slice(0, i)));
-      resolve({ type: 'kms', n, w: +w, h: +h, stride: +stride, sock: s });
+      resolve({ type, n, w: +w, h: +h, stride: +stride, sock: s });
     };
     s.on('data', onData);
     s.on('error', reject);
   });
 }
+
+// Wayland helper: the socket may appear a moment after the board starts (cage launches both); retry for ~12 s
+async function wlList() {
+  let err;
+  for (let i = 0; i < 24; i++) {
+    try { return await kmsList(WL_SOCK, 'wl'); } catch (e) { err = e; await new Promise((r) => setTimeout(r, 500)); }
+  }
+  throw err;
+}
+const wlConnect = (n) => kmsConnect(n, WL_SOCK, 'wl');
 
 // primary: keep one child board per extra display running
 const children = new Map(); // n -> ChildProcess
@@ -96,7 +109,7 @@ function startChildren(outputs, boardJs, log) {
   for (const o of outputs) {
     if (o.index === 0) continue;
     const run = () => {
-      const args = [boardJs, '--display', String(o.index), '--output', o.type === 'kms' ? `kms:${o.n}` : o.dev];
+      const args = [boardJs, '--display', String(o.index), '--output', o.type === 'kms' ? `kms:${o.n}` : o.type === 'wl' ? `wl:${o.n}` : o.dev];
       const env = { ...process.env, ODJEZDY_CONFIG: displayConfig(o.index), ODJEZDY_CHILD: '1' };
       const c = spawn(process.execPath, args, { env, stdio: 'ignore' });
       children.set(o.index, c);
@@ -110,4 +123,4 @@ let stopping = false;
 function stopChildren() { stopping = true; for (const c of children.values()) try { c.kill('SIGTERM'); } catch {} }
 function reloadChild(n) { try { children.get(n)?.kill('SIGHUP'); } catch {} }
 
-module.exports = { detect, startKms, kmsConnect, startChildren, stopChildren, reloadChild, displayConfig, framebuffers };
+module.exports = { detect, startKms, kmsConnect, wlList, wlConnect, startChildren, stopChildren, reloadChild, displayConfig, framebuffers };

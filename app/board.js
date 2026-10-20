@@ -285,6 +285,51 @@ function startMouse() {
   }, 15);
 }
 
+// Keyboard for a board without a terminal (kiosk under a Wayland compositor): evdev, US layout, enough for the menus
+const KEYMAP = (() => {
+  const m = {}, rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], starts = [16, 30, 44];
+  rows.forEach((r, i) => [...r].forEach((ch, j) => { m[starts[i] + j] = [ch, ch.toUpperCase()]; }));
+  '1234567890'.split('').forEach((d, i) => { m[2 + i] = [d, '!@#$%^&*()'[i]]; });
+  Object.assign(m, { 57: [' ', ' '], 28: ['\r', '\r'], 1: ['\u001b', '\u001b'], 14: ['\u007f', '\u007f'], 15: ['\t', '\t'], 12: ['-', '_'], 52: ['.', '>'], 51: [',', '<'], 53: ['/', '?'],
+    103: ['\u001b[A', '\u001b[A'], 108: ['\u001b[B', '\u001b[B'], 106: ['\u001b[C', '\u001b[C'], 105: ['\u001b[D', '\u001b[D'], 104: ['\u001b[5~', '\u001b[5~'], 109: ['\u001b[6~', '\u001b[6~'], 96: ['\r', '\r'] });
+  return m;
+})();
+function startKeyboard() {
+  const kbds = new Map();
+  let shift = false;
+  const scan = () => {
+    let devs = [];
+    try {
+      devs = fs.readFileSync('/proc/bus/input/devices', 'utf8').split(/\n\s*\n/).filter((b) => /H: Handlers=.*\bkbd\b/.test(b) && /EV=1[2-9a-f]/i.test(b))
+        .map((b) => (b.match(/\b(event\d+)\b/) || [])[1]).filter(Boolean);
+    } catch { return; }
+    for (const n of devs) {
+      if (kbds.has(n)) continue;
+      try { kbds.set(n, fs.openSync('/dev/input/' + n, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)); log('keyboard ' + n + ': listening'); } catch (e) { kbds.set(n, null); log('keyboard ' + n + ': ' + e.code); }
+    }
+  };
+  scan(); setInterval(scan, 3000);
+  const buf = Buffer.alloc(24 * 32);
+  setInterval(() => {
+    for (const [n, fd] of kbds) {
+      if (fd === null) continue;
+      for (;;) {
+        let len;
+        try { len = fs.readSync(fd, buf, 0, buf.length, null); } catch (e) { if (e.code !== 'EAGAIN') { try { fs.closeSync(fd); } catch {} kbds.delete(n); } break; }
+        if (!len) break;
+        for (let o = 0; o + 24 <= len; o += 24) {
+          const type = buf.readUInt16LE(o + 16), code = buf.readUInt16LE(o + 18), value = buf.readInt32LE(o + 20);
+          if (type !== 1) continue;
+          if (code === 42 || code === 54) { shift = value !== 0; continue; }
+          if (value === 0) continue; // key up
+          const k = KEYMAP[code];
+          if (k) onKey(shift ? k[1] : k[0]);
+        }
+      }
+    }
+  }, 15);
+}
+
 function onInput(type, code, value, absMax) {
   if (!pointer.enabled || !screen) return;
   const EV_KEY = 1, EV_REL = 2, EV_ABS = 3;
@@ -2392,7 +2437,7 @@ let kmsProc = null;
 state.displays = []; // primary: [{ index, type, name, w, h }]
 async function setupOutputs() {
   if (PNG_OUT) return null;
-  if (IS_CHILD) return OUTPUT.startsWith('kms:') ? displays.kmsConnect(Number(OUTPUT.slice(4))) : null;
+  if (IS_CHILD) return OUTPUT.startsWith('kms:') ? displays.kmsConnect(Number(OUTPUT.slice(4))) : OUTPUT.startsWith('wl:') ? displays.wlConnect(Number(OUTPUT.slice(3))) : null;
   const d = displays.detect();
   log(`displays: ${d.mode}${d.connectors ? ' (' + d.connectors.join(', ') + ')' : ''}`);
   if (d.mode === 'fb') {
@@ -2407,13 +2452,39 @@ async function setupOutputs() {
       return displays.kmsConnect(0);
     } catch (e) { log('odjezdy-kms: ' + e.message + ', single display'); state.displays = []; }
   }
+  if (d.mode === 'wl') {
+    try {
+      const outs = await displays.wlList();
+      state.displays = outs.map((o, i) => ({ ...o, index: i }));
+      displays.startChildren(state.displays, __filename, log);
+      return displays.wlConnect(0);
+    } catch (e) { log('odjezdy-wl: ' + e.message + ', single display'); state.displays = []; }
+  }
   if (state.displays.length > 1) displays.startChildren(state.displays, __filename, log);
   return null;
+}
+// The Wayland helper closes the connection when its window changes size or goes away: reconnect to the same output; when the
+// size is different, exit so the supervisor (cage / systemd) starts the board again with the new size.
+function watchWl(conn) {
+  const n = conn.n;
+  const again = async (tries) => {
+    try {
+      const c = await displays.wlConnect(n);
+      if (c.w !== screen.w || c.h !== screen.h || c.stride !== screen.stride) { log(`wayland output ${n} is now ${c.w}x${c.h}, restarting`); process.exit(0); }
+      screen.sock = c.sock; screen.shown = null; c.sock.on('close', () => again(0));
+    } catch (e) {
+      if (tries > 20) { log('wayland output lost: ' + e.message); process.exit(0); }
+      setTimeout(() => again(tries + 1), 500);
+    }
+  };
+  conn.sock.on('close', () => again(0));
 }
 
 async function main() {
   state.cfg = loadConfig();
-  screen = new Screen(await setupOutputs());
+  const outConn = await setupOutputs();
+  screen = new Screen(outConn);
+  if (outConn?.type === 'wl') watchWl(outConn);
   m = new Matrix(screen.cols, screen.rows);
   state.ip = localIp();
 
@@ -2490,6 +2561,7 @@ async function main() {
   pointer.enabled = state.cfg.custom?.cursor !== false;
   pointer.x = screen.w / 2; pointer.y = screen.h / 2;
   startMouse();
+  if (!process.stdin.isTTY) startKeyboard(); // kiosk under a Wayland compositor: no terminal, the keys come from evdev
   setInterval(tick, 50);
   setInterval(scrollTick, 33);
   setInterval(() => { const n = Date.now(); perf.lagMax = Math.max(perf.lagMax, n - lagAt - 100); lagAt = n; }, 100); // how late a 100 ms timer fires
