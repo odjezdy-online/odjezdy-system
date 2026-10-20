@@ -79,7 +79,7 @@ print("OK:", len(objs), "progress lines,", n, "in pacstrap")
 echo "== $MODE: boot the installed system from the disk (desktop: $DESKTOP)"
 start
 if [ "$DESKTOP" != none ]; then
-  sleep $((120 * K))
+  sleep $((150 * K))
   python3 "$HERE/qmp.py" "$QMP" shot "$TMP/vt1.png" >/dev/null
   python3 "$HERE/qmp.py" "$QMP" key ctrl+alt+f2; sleep $((10 * K))
   python3 "$HERE/qmp.py" "$QMP" shot "$TMP/vt2.png" >/dev/null
@@ -88,7 +88,8 @@ if [ "$DESKTOP" != none ]; then
   python3 "$HERE/qmp.py" "$QMP" type 'root\n'; sleep 5
   python3 "$HERE/qmp.py" "$QMP" type 'test\n'; sleep 8
   python3 "$HERE/qmp.py" "$QMP" type 'loadkezs us\n'; sleep 2
-  python3 "$HERE/qmp.py" "$QMP" type '{ echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager | tail -60; ls -la /run/user/0 /dev/input; pgrep -a "cage|odjezdy-wl|node"; echo DIAG-END; } > /dev/ttyS0 2>&1\n'
+  # (qmp.py cannot type braces: a subshell in parentheses it is)
+  python3 "$HERE/qmp.py" "$QMP" type '( echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager | tail -80; ls -la /run/user/0 /dev/input; pgrep -a cage; pgrep -a odjezdy-wl; pgrep -a node; echo DIAG-END ) > /dev/ttyS0 2>&1\n'
   wait_for 'DIAG-END' $((30 * K)) || echo "(no diagnostics: the login on tty2 did not take the keys)"
   tr -d '\000\r' < "$SER" | sed -n '/DIAG-START/,/DIAG-END/p' | tail -100
   S1=$(stat -c %s "$TMP/vt1.png"); S2=$(stat -c %s "$TMP/vt2.png")
