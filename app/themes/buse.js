@@ -45,14 +45,13 @@ module.exports = {
 
     // paginate: fill each page top-down; a notice row costs more height, but every page keeps at least
     // MIN_PER_PAGE departures (later ones then fall back to a single row with "+N").
-    const MIN_PER_PAGE = 5, MAX_PAGES = 4, PAGE_MS = 8000;
+    const MIN_PER_PAGE = 0, MAX_PAGES = 6, PAGE_MS = 8000;
     const pages = [];
     let page = [], used = 0;
     for (const d of state.deps.filter((x) => depTime(x) > Date.now() - 30000)) {
       if (pages.length >= MAX_PAGES) break;
       let notice = depNotice(d), tall = !!notice || hasDelay(d);
       const stillNeeded = Math.max(0, MIN_PER_PAGE - page.length - 1);
-      if (tall && used + rowH2 + stillNeeded * L.rowH > avail) { notice = null; tall = false; }
       const h = tall ? rowH2 : L.rowH;
       if (used + h > avail) {
         pages.push(page); page = []; used = 0;
@@ -81,7 +80,7 @@ module.exports = {
     let y = L.top;
     for (const { d, notice, tall, h } of pages[pi] || []) {
       const mins = Math.round((depTime(d) - Date.now()) / 60000);
-      const line = String(d.line ?? '');
+      const line = String(d.line || d.trainNumber || d.category || '');
       const midRow = y;
       m.textRight(fitText(line, 'normal', lineW), 2 + lineW, midRow, 'normal', C.AMBER);
 

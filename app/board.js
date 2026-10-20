@@ -1041,7 +1041,7 @@ function nativeDisruption(c, t, th) {
     if (c.measure(n, body, 24 * s) > c.w - 240 * s && dcur) { detailLines.push(dcur); dcur = w; } else dcur = n;
   }
   if (dcur) detailLines.push(dcur);
-  const shown = lines.slice(0, 3), det = detailLines.slice(0, Math.max(5, Math.floor((c.h - 110 * s - shown.length * 42 * s - 100 * s) / (34 * s))));
+  const shown = lines.slice(0, 5), det = detailLines.slice(0, Math.max(5, Math.floor((c.h - 110 * s - shown.length * 42 * s - 100 * s) / (34 * s))));
   const h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
   const y0 = (c.h - h) / 2;
   overlayRect = { x: 60 * s, y: y0, w: c.w - 120 * s, h };
@@ -1123,7 +1123,7 @@ function renderDisruption(m, t) {
   if (typeof th.renderAlert === 'function') { th.renderAlert(m, t, themeApi, text); return true; }
   const W = m.cols, big = face('big').rows, nor = face('normal').rows;
   const info = state.alertInfo?.get(text) || {}, sm = face('small').rows;
-  const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.min(3, Math.floor((m.rows - big - 30) / (nor + 3)))));
+  const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.min(5, Math.floor((m.rows - big - 30) / (nor + 3)) - 2)));
   const room = Math.max(0, Math.floor((m.rows - big - 20 - lines.length * (nor + 3) - (info.valid ? sm + 4 : 0)) / (sm + 2)));
   const det = info.details ? wrapText(info.details, 'small', W - 16, Math.min(8, room)) : [];
   const h = big + 10 + lines.length * (nor + 3) + (det.length ? 4 + det.length * (sm + 2) : 0) + (info.valid ? sm + 4 : 0) + 6;
