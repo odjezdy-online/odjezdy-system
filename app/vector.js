@@ -266,19 +266,22 @@ class Canvas {
   hline(x0, x1, y, col, thick = 1) { this.rect(x0, y, x1 - x0, thick, col); }
   // "LED screen" filter: the vector image is averaged per pitch×pitch cell and redrawn as round dots
   // (brightness kept, so glyph edges stay smooth like browser-rendered text, just made of LEDs).
-  dotScreen(pitch, { bg = [0, 0, 0], off = [16, 10, 4], radius = 0.42 } = {}) {
+  dotScreen(pitch, { bg = [0, 0, 0], off = [16, 10, 4], radius = 0.42, region = null } = {}) {
     const { w, h, rgb } = this;
-    const cols = Math.floor(w / pitch), rows = Math.floor(h / pitch);
+    // region {x, y, w, h}: only that rectangle becomes LEDs (printed labels around it stay crisp)
+    const rx = region ? Math.max(0, Math.round(region.x)) : 0, ry = region ? Math.max(0, Math.round(region.y)) : 0;
+    const rw = region ? Math.min(w - rx, Math.round(region.w)) : w, rh = region ? Math.min(h - ry, Math.round(region.h)) : h;
+    const cols = Math.floor(rw / pitch), rows = Math.floor(rh / pitch);
     const avg = new Float32Array(cols * rows * 3);
     for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
       let r = 0, g = 0, b = 0;
       for (let y = cy * pitch; y < cy * pitch + pitch; y++) for (let x = cx * pitch; x < cx * pitch + pitch; x++) {
-        const o = (y * w + x) * 3; r += rgb[o]; g += rgb[o + 1]; b += rgb[o + 2];
+        const o = ((ry + y) * w + rx + x) * 3; r += rgb[o]; g += rgb[o + 1]; b += rgb[o + 2];
       }
       const n = pitch * pitch, i = (cy * cols + cx) * 3;
       avg[i] = r / n; avg[i + 1] = g / n; avg[i + 2] = b / n;
     }
-    this.clear(bg);
+    if (region) this.rect(rx, ry, cols * pitch, rows * pitch, bg); else this.clear(bg);
     const rad = pitch * radius, c0 = (pitch - 1) / 2;
     // precomputed anti-aliased dot mask
     const mask = new Float32Array(pitch * pitch);
@@ -296,7 +299,7 @@ class Canvas {
       const g = off[1] + (Math.min(255, avg[i + 1] * boost) - off[1]) * k;
       const b = off[2] + (Math.min(255, avg[i + 2] * boost) - off[2]) * k;
       for (let y = 0; y < pitch; y++) {
-        let o = ((cy * pitch + y) * w + cx * pitch) * 3;
+        let o = ((ry + cy * pitch + y) * w + rx + cx * pitch) * 3;
         for (let x = 0; x < pitch; x++, o += 3) {
           const a = mask[y * pitch + x];
           if (!a) continue;
