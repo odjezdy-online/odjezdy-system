@@ -36,6 +36,7 @@ module.exports = {
   background: [0, 0, 0],
   unlit: [22, 14, 0],
   colors: { 1: [255, 176, 0], 2: [140, 92, 0], 5: [255, 210, 90] },
+  alertStyle: { bg: [0, 0, 0], ink: [255, 176, 0], accent: [255, 96, 30], dim: [150, 100, 0], dots: 420, off: [16, 10, 4] }, // the notice replaces the departures, as LEDs
   render(m, t, api) {
     const { C, state, textWidth, fitText, hhmm, depTime, platformOf, minutesTo, depNotice, stopLabel } = api;
     const W = m.cols, nor = api.FONTS.normal.rows, big = api.FONTS.big.rows;

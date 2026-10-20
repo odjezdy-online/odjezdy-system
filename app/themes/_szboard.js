@@ -32,6 +32,7 @@ function makeBoard(opts) {
     colors: { 1: P.ink, 2: P.dim, 3: P.late, 5: P.ink, 10: P.time },
     render(m, t, api) { require('./_simple').simpleLed(m, t, api, { title: opts.title || 'Odjezdy' }); },
     nativeFont: F.bold,
+    alertStyle: { bg: P.bg, ink: P.ink, accent: P.late, dim: P.dim, dots: opts.dots || 0, off: P.off },
     renderNative(c, t, api) {
       const { state, hhmm, depTime, minutesTo, stopLabel } = api;
       const s = Math.min(c.w / 1280, c.h / 720), W = c.w, H = c.h, now = new Date();

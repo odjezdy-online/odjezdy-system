@@ -749,6 +749,18 @@ function alertActive(a) {
   if (a.validFrom && new Date(a.validFrom).getTime() > now + 36 * 3600000) return false;
   return true;
 }
+// Alerts the server relates to this stop only through a line (the closure itself is elsewhere, e.g. R15 replaced by buses
+// near Kadaň while the board is Praha): at most 3, only matches by line, and the text says which lines it is about, so
+// it does not read as if it concerned the whole stop. Matches by the stop's name in the text are not shown (unreliable).
+function scopedRelated(j) {
+  const here = new Set((j.data || []).map((d) => String(d.line)));
+  return (j.relatedAlerts || []).filter((a) => a.match === 'line').slice(0, 3).map((a) => {
+    const ls = (a.lines || []).map(String), mine = ls.filter((l) => here.has(l)), show = (mine.length ? mine : ls).slice(0, 4);
+    const head = cleanText(a.summary || a.title);
+    if (!show.length || !head) return a;
+    return { ...a, summary: `${show.length > 1 ? 'Linky' : 'Linka'} ${show.join(', ')}${show.length < (mine.length || ls.length) ? '…' : ''}: ${head}` };
+  });
+}
 function noteAlert(a) {
   const text = cleanText(a.summary || a.title);
   if (!text) return '';
@@ -784,7 +796,7 @@ async function fetchBoardRows(ids) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
       // PID notices from the departure board itself (infotexts: inline strip / full-screen) plus our alerts
-      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...[...(j.alerts || []), ...(j.relatedAlerts || []).slice(0, 3)].filter(alertActive).filter((al) => {
+      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...[...(j.alerts || []), ...scopedRelated(j)].filter(alertActive).filter((al) => {
         // an alert that names no stops and was matched by line number only belongs to this stop only when a departure
         // of the alert's own operator runs here (a DÚK alert about U1/R15 must not follow ČD's R15 to Praha)
         const provs = new Set((j.data || []).map((d) => d.provider));
@@ -821,6 +833,8 @@ async function transitousStopFor(stop) {
   return hit?.id || null;
 }
 
+// destination reduced to a comparable key: "Nymburk hl.n." and "Nymburk hlavní nádraží" are the same place
+const railDestKey = (n) => stripAccents(String(n || '').toLowerCase()).replace(/hlavni nadrazi|hl\.? ?n\.?/g, '').replace(/[^a-z]/g, '').slice(0, 8);
 async function refreshBoard() {
   if (isTransitous()) return refreshTransitous();
   const ids = state.cfg.stop.ids.slice(0, 8);
@@ -852,13 +866,27 @@ async function refreshBoard() {
     // number and minute, keeping the copy that knows more (destination, platform, delay)
     const minute = Math.floor(new Date(d.plannedTime).getTime() / 60000);
     const k = d.trainNumber ? `T|${String(d.trainNumber).replace(/\D/g, '')}|${minute}` : `${d.line}|${d.destination}|${minute}`;
-    const prev = seen.get(k);
+    // PID rows (line S7, no train number) and ČD rows (Os 9972) of the same train have no number in common: same minute,
+    // same destination and another provider = the same train
+    const rail = d.type === 'train' || d.type === 'rail';
+    const rk = rail ? `R|${minute}|${railDestKey(d.destination)}` : '';
+    let prev = seen.get(k);
+    if (!prev && rk) { const q = seen.get(rk); if (q && q.provider !== d.provider) prev = q; }
     if (prev) {
-      const score = (x) => (x.destination ? 4 : 0) + (x.platform ? 2 : 0) + (Number.isFinite(x.delayMinutes) ? 1 : 0);
-      if (score(d) > score(prev)) all[all.indexOf(prev)] = d, seen.set(k, d);
+      const score = (x) => (x.destination ? 4 : 0) + (x.platform && !/^(N[/]A|Neznámé|unknown)$/i.test(x.platform) ? 2 : 0) + (Number.isFinite(x.delayMinutes) ? 1 : 0) + (x.trainNumber ? 1 : 0);
+      const win = score(d) > score(prev) ? d : prev, lose = win === d ? prev : d;
+      for (const f of ['platform', 'trainNumber', 'category', 'operator', 'delayMinutes', 'delaySeconds', 'expectedTime']) { // fill what the better copy lacks
+        const empty = (v) => v == null || v === '' || /^(N[/]A|Neznámé|unknown)$/i.test(String(v));
+        if (empty(win[f]) && !empty(lose[f])) win[f] = lose[f];
+      }
+      const numbered = (l) => /^[SRU]\d+$/i.test(String(l || '')); // the PID line (S7, R15) is the better label than the bare category "Os"
+      if (!numbered(win.line) && numbered(lose.line)) win.line = lose.line;
+      if (win.trainNumber && !win.train) win.train = `${win.category || win.line || ''} ${win.trainNumber}`.trim();
+      if (win !== prev) { all[all.indexOf(prev)] = win; }
+      seen.set(k, win); if (rk) seen.set(rk, win);
       continue;
     }
-    seen.set(k, d); all.push(d);
+    seen.set(k, d); if (rk) seen.set(rk, d); all.push(d);
   }
   all.sort((a, b) => depTime(a) - depTime(b));
   for (const d of all) { d.destination = tidyName(d.destination); if (d.via) d.via = d.via.map(tidyName); }
@@ -1098,16 +1126,23 @@ function nativeDisruption(c, t, th) {
     orig.splice(Math.max(0, Math.min(5, Math.floor((c.h * 0.94 - h - 10 * s) / (27 * s)))));
     if (orig.length) h += 10 * s + orig.length * 27 * s;
   }
-  const y0 = (c.h - h) / 2;
-  overlayRect = { x: 60 * s, y: y0, w: c.w - 120 * s, h };
-  c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
-  c.rect(60 * s, y0, 14 * s, h, [236, 0, 22]);
-  c.text('Mimořádnost', 110 * s, y0 + 62 * s, { font, size: 40 * s, color: [236, 0, 22] });
+  // The notice takes the place of the departures, in the colours and the lettering of the theme (a theme can set alertStyle
+  // { bg, ink, accent, dim, dots }; otherwise they come from its background and colour slots)
+  const al = th.alertStyle || {}, pick = (n, d) => (Array.isArray(th.colors?.[n]) ? th.colors[n] : d);
+  const bg = al.bg || th.background || [0, 0, 0], light = bg[0] * 0.3 + bg[1] * 0.59 + bg[2] * 0.11 > 150;
+  const ink = al.ink || (light ? [20, 24, 36] : pick(1, [255, 255, 255])), accent = al.accent || (pick(3, null) && !light ? pick(3, [236, 0, 22]) : [220, 20, 30]);
+  const dim = al.dim || (light ? [90, 96, 112] : pick(2, [170, 170, 170]));
+  const y0 = Math.max(10 * s, (c.h - h) / 2), x0 = 90 * s;
+  overlayRect = { x: 0, y: 0, w: c.w, h: c.h };
+  c.clear(bg);
+  c.rect(60 * s, y0, 10 * s, h, accent);
+  c.text('Mimořádnost', x0, y0 + 62 * s, { font, size: 40 * s, color: accent });
   let yy = y0 + 112 * s;
-  shown.forEach((l) => { c.text(l, 110 * s, yy, { font, size: 30 * s, color: [20, 20, 40] }); yy += 42 * s; });
-  if (det.length) { yy += 12 * s - 6 * s; det.forEach((l) => { c.text(l, 110 * s, yy, { font: body, size: 24 * s, color: [70, 70, 90] }); yy += 34 * s; }); }
-  if (info.valid) { c.text(info.valid, 110 * s, yy + 8 * s, { font, size: 24 * s, color: [236, 0, 22] }); yy += 40 * s; }
-  if (orig.length) { yy += 6 * s; orig.forEach((l) => { c.text(l, 110 * s, yy, { font: body, size: 20 * s, color: [110, 110, 125] }); yy += 27 * s; }); }
+  shown.forEach((l) => { c.text(l, x0, yy, { font, size: 30 * s, color: ink }); yy += 42 * s; });
+  if (det.length) { yy += 12 * s - 6 * s; det.forEach((l) => { c.text(l, x0, yy, { font: body, size: 24 * s, color: ink, alpha: 0.85 }); yy += 34 * s; }); }
+  if (info.valid) { c.text(info.valid, x0, yy + 8 * s, { font, size: 24 * s, color: accent }); yy += 40 * s; }
+  if (orig.length) { yy += 6 * s; orig.forEach((l) => { c.text(l, x0, yy, { font: body, size: 20 * s, color: dim }); yy += 27 * s; }); }
+  if (al.dots) c.dotScreen(Math.max(2, Math.round(c.w / al.dots)), { bg, off: al.off || [12, 10, 6] });
 }
 
 function renderBoard(m, t) {

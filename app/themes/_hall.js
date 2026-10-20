@@ -17,6 +17,7 @@ function makeHall(cfg) {
     colors: { 1: cfg.ink, 2: cfg.dim, 3: [255, 90, 70], 5: cfg.ink, 10: cfg.ink },
     render(m, t, api) { require('./_simple').simpleLed(m, t, api, { title: cfg.simpleTitle || 'Odjezdy' }); },
     nativeFont: cfg.font,
+    alertStyle: { bg: cfg.bg, ink: cfg.ink, accent: cfg.accent || [255, 76, 52], dim: cfg.dim, dots: cfg.dots ? Math.round(cfg.dots * 1.05) : 0, off: cfg.off },
     renderNative(c, t, api) {
       const { state } = api;
       const s = Math.min(c.w / 1280, c.h / 720), W = c.w, H = c.h, now = new Date();
