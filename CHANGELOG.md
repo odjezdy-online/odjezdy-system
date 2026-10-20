@@ -2,6 +2,13 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.8
+- Podrobnosti hlášení se na celoobrazovém oznámení už neusekávají, využijí celé volné místo
+- Dlouhé nadpisy výluk vlaků (ČD) se vejdou celé
+- BUSE: řádek se zpožděním na konci stránky se přesune na další stránku místo zmenšení
+- BUSE: sloupec linky se rozšíří pro dlouhá čísla linek (např. zahraniční 1398)
+- Vzhledy už neukazují zdroj dat JDF jako dopravce, DUK se píše „DÚK“
+
 ## 0.5.7
 - Krátké hlášení v pruhu se už nezobrazuje dvakrát za sebou
 - Hlášení bez podrobností se doplní celým textem z popisu, takže se už nezkracuje („PRODLOUŽ…“)

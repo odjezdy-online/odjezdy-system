@@ -22,7 +22,9 @@ module.exports = {
     m.hline(0, W - 1, L.headerLine, C.DIM);
 
     // columns
-    const lineW = Math.max(textWidth('888', 'normal'), textWidth('Linka', 'small'));
+    // wide enough for the longest line label of the whole list (a foreign line such as "1398" or "FLX 13"), at most a quarter of the width
+    const labelW = Math.max(0, ...state.deps.map((d) => textWidth(String(d.line || d.trainNumber || d.category || ''), 'normal')));
+    const lineW = Math.min(Math.floor(W / 4), Math.max(textWidth('888', 'normal'), textWidth('Linka', 'small'), labelW));
     const colDest = 2 + lineW + 6, colIn = W - 2;
     m.textRight('Linka', 2 + lineW, L.colHead, 'small', C.DIM);
     m.text('Směr', colDest, L.colHead, 'small', C.DIM);
