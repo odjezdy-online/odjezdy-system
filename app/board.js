@@ -726,7 +726,7 @@ function noteAlert(a) {
   // details from the server; without them, a title the source cut off ("přetrasování ...") is completed from the
   // full description (the source's own text, e.g. DÚK), so notices are not cut off
   let details = cleanText(a.details);
-  if (!details && /(\.\.\.|…)$/.test(text) && a.description) details = cleanText(a.description).slice(0, 420);
+  if (!details && /(\.\.\.|…)$/.test(text) && (a.description || a.text)) details = cleanText(a.description || a.text).slice(0, 420);
   (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '' });
   return text;
 }
@@ -944,7 +944,7 @@ function scrollerRegister(cv, o) {
   const key = o.text.slice(0, 200) + '|' + Math.round(o.w);
   if (!scrollPhase.has(key)) { if (scrollPhase.size > 20) scrollPhase.clear(); scrollPhase.set(key, Date.now()); }
   const sc = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h), strip, speed: o.speed || 90, gap: Math.round(o.gap || 120), bg: o.bg, t0: scrollPhase.get(key) };
-  if (strip.w <= sc.w) { scrollerPaint(cv, { ...sc, speed: 0 }, sc.t0); return; } // fits: static, nothing to animate
+  if (strip.w <= sc.w) { scrollerPaint(cv, { ...sc, speed: 0, gap: sc.w }, sc.t0); return; } // gap = box width: one copy only, no repeat // fits: static, nothing to animate
   scrollers.push(sc);
   scrollerPaint(cv, sc, Date.now()); // paint where the text is NOW (painting at the start made it jump back at every theme re-render)
 }
