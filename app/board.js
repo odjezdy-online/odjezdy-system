@@ -679,7 +679,16 @@ const state = {
   cfg: null, deps: [], alerts: [], lastOk: 0, error: null, net: 'čekám na síť', ip: null,
   mode: 'board', query: '', results: [], sel: 0, msg: null, msgUntil: 0,
 };
-function log(s) { try { fs.appendFileSync('/tmp/odjezdy.log', `[${new Date().toISOString()}] ${s}\n`); } catch {} }
+function log(s) {
+  const line = `[${new Date().toISOString()}] ${s}\n`;
+  try { fs.appendFileSync('/tmp/odjezdy.log', line); } catch {}
+  if (!PNG_OUT && !process.stdout.isTTY) { try { process.stderr.write(line); } catch {} } // under a Wayland compositor / systemd: into the journal
+}
+if (!PNG_OUT) {
+  process.on('exit', (c) => log('board exiting, code ' + c + ', up ' + Math.round(process.uptime()) + ' s'));
+  process.on('SIGTERM', () => log('SIGTERM received'));
+  process.on('SIGHUP', () => log('SIGHUP received'));
+}
 
 async function getJson(p, timeout = 25000) {
   const ctrl = new AbortController();
@@ -2471,10 +2480,14 @@ function watchWl(conn) {
     try {
       const c = await displays.wlConnect(n);
       if (c.w !== screen.w || c.h !== screen.h || c.stride !== screen.stride) {
-        // the compositor may still be settling right after start: give it a few seconds before restarting (a restart loop = black window)
-        c.sock.destroy();
-        if (tries < 5) { setTimeout(() => again(tries + 1), 1500); return; }
-        log(`wayland output ${n} is now ${c.w}x${c.h}, restarting`); process.exit(0);
+        // the window got another size (the compositor settles after the start): continue with a new screen of that size
+        // instead of exiting, which made the supervisor restart the board in a loop
+        log(`wayland output ${n} resized to ${c.w}x${c.h}`);
+        const old = screen;
+        screen = new Screen(c);
+        screen.gain = old.gain; lastNative = 0; nativeCanvas = null;
+        c.sock.on('close', () => again(0));
+        return;
       }
       screen.sock = c.sock; screen.shown = null; c.sock.on('close', () => again(0));
     } catch (e) {
