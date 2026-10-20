@@ -1141,7 +1141,12 @@ function renderDisruption(m, t) {
   if (list.length > 1) m.textRight(`${slot.i + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
   return true;
 }
+// short operator label for themes: the server's provider code is a data source (JDF = the national timetable
+// data, DUK = Ústecký kraj), not always something a passenger knows, so JDF is not shown
+const PROVIDER_LABEL = { JDF: '', DUK: 'DÚK' };
+const providerLabel = (d) => (d.provider in PROVIDER_LABEL ? PROVIDER_LABEL[d.provider] : d.provider || '');
 const themeApi = {
+  providerLabel,
   vector: () => vector,
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,
   depTime, minutesTo, platformOf, upcoming, depNotice, hasDelay, delayLabel, delayColor, layout, statusText,

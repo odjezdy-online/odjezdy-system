@@ -78,9 +78,9 @@ function railBoard(m, t, api, deps, hy) {
     // small line above the destination: disruption first, otherwise operator / line
     const n = depNotice(d);
     const over = n ? n.text : d.via?.length ? d.via.slice(0, 4).join(' · ') : '';
-    const opW = d.provider ? textWidth(d.provider, 'small') + 4 : 0; // operator in its own cell, right of the Über line
+    const opW = api.providerLabel(d) ? textWidth(api.providerLabel(d), 'small') + 4 : 0; // operator in its own cell, right of the Über line
     if (over) marquee(m, api, over, colMid, midEnd - opW - 3, y + 1, 'small', n ? C.YELLOW : C.DIM, t);
-    if (opW) m.textRight(d.provider, midEnd, y + 1, 'small', C.DIM);
+    if (opW) m.textRight(api.providerLabel(d), midEnd, y + 1, 'small', C.DIM);
     const dest = d.cancelled ? `${d.destination}  · fällt aus` : d.destination || '';
     m.text(fitText(dest, 'normal', midEnd - colMid), colMid, yTime, 'normal', d.cancelled ? C.RED : C.AMBER);
     const plat = platformOf(d);
@@ -213,10 +213,10 @@ function nativeRender(c, t, api) {
       // "über" line, destination, platform
       const over = n ? n.text : d.via?.length ? d.via.slice(0, 5).join(' – ') : '';
       // operator (ČD, DÚK, PID …) is its own cell at the right end of the Über line, not part of the stop list
-      const opW = d.provider ? c.measure(d.provider, F.semi, 14 * s) + 18 * s : 0;
+      const opW = api.providerLabel(d) ? c.measure(api.providerLabel(d), F.semi, 14 * s) + 18 * s : 0;
       if (opW) {
         c.roundRect(midEnd - opW, y + 14 * s, opW, 22 * s, 4 * s, N.line);
-        c.text(d.provider, midEnd - opW / 2, y + 30 * s, { font: F.semi, size: 14 * s, color: N.white, align: 'center' });
+        c.text(api.providerLabel(d), midEnd - opW / 2, y + 30 * s, { font: F.semi, size: 14 * s, color: N.white, align: 'center' });
       }
       c.text(over, colM, y + 30 * s, { font: n ? F.semi : F.reg, size: 16 * s, color: n ? N.yellow : N.dim, maxW: midEnd - colM - opW - 10 * s });
       c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 10 * s });

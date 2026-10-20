@@ -3,7 +3,7 @@ const { simpleLed } = require('./_simple');
 const { paginate, emptyMessage, countdown, isRail } = require('./_util');
 const F = { regular: 'FiraSans-Regular', bold: 'FiraSans-Bold', condensed: 'BarlowCondensed-SemiBold' };
 function subline(d, api) {
-  return [d.provider, isRail(d) && d.train, d.via?.length && 'přes ' + d.via.join(', '), api.depNotice(d)?.text].filter(Boolean).join(' · ');
+  return [api.providerLabel(d), isRail(d) && d.train, d.via?.length && 'přes ' + d.via.join(', '), api.depNotice(d)?.text].filter(Boolean).join(' · ');
 }
 function delay(d, api) { return d.cancelled ? 'ZRUŠENO' : api.hasDelay(d) ? api.delayLabel(d) : ''; }
 function page(c, t, api, per = 5) { return paginate(api.upcoming(), per, t, 8000); }
@@ -45,7 +45,7 @@ module.exports = {
   render(m, t, api) {
     // Keep the standard LED fallback, adding metadata/cancellation without changing shared rows.
     const fallbackApi = { ...api, upcoming: () => api.upcoming().map(d => ({ ...d,
-      destination: [d.destination || 'cíl neuveden', d.cancelled && 'ZRUŠENO', d.provider,
+      destination: [d.destination || 'cíl neuveden', d.cancelled && 'ZRUŠENO', api.providerLabel(d),
         d.via?.length && 'přes ' + d.via.join(', ')].filter(Boolean).join(' · ') })) };
     simpleLed(m, t, fallbackApi);
   },

@@ -111,11 +111,11 @@ function nativeSBB(c, t, api) {
     c.text(d.cancelled ? `${d.destination} — fällt aus` : d.destination, colDest, y + 48 * s, { font: FS.bold, size: 34 * s, color: d.cancelled ? SB.red : SB.white, maxW: x1 - colDest - platW - 20 * s });
     const n = depNotice(d);
     const sub = n ? n.text : d.via?.length ? d.via.slice(0, 4).join(' · ') : ({ tram: 'Tram', bus: 'Bus', trolleybus: 'Trolleybus', metro: 'Metro', train: 'Zug', ferry: 'Schiff' }[d.type] || '');
-    const opW = d.provider ? c.measure(d.provider, FS.bold, 16 * s) + 16 * s : 0; // operator in its own cell
+    const opW = api.providerLabel(d) ? c.measure(api.providerLabel(d), FS.bold, 16 * s) + 16 * s : 0; // operator in its own cell
     c.text(sub, colDest, y + 78 * s, { font: n ? FS.bold : FS.reg, size: 20 * s, color: n ? SB.red : SB.dim, maxW: x1 - colDest - platW - opW - 36 * s });
     if (opW) {
       c.roundRect(x1 - platW - opW - 10 * s, y + 62 * s, opW, 22 * s, 4 * s, SB.line);
-      c.text(d.provider, x1 - platW - opW / 2 - 10 * s, y + 78 * s, { font: FS.bold, size: 16 * s, color: SB.white, align: 'center' });
+      c.text(api.providerLabel(d), x1 - platW - opW / 2 - 10 * s, y + 78 * s, { font: FS.bold, size: 16 * s, color: SB.white, align: 'center' });
     }
     const plat = platformOf(d);
     if (plat) {
