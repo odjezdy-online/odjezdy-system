@@ -92,6 +92,10 @@ if [ "$DESKTOP" != none ]; then
   python3 "$HERE/qmp.py" "$QMP" type '( echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager -o cat | grep -v "drm.c\|pci id\|seat.c\|Xwayland\|XWayland\|env.c\|libseat" | head -90; ls -la /run/user/0 /dev/input; pgrep -a cage; pgrep -a odjezdy-wl; pgrep -a node; echo DIAG-END ) > /dev/ttyS0 2>&1\n'
   wait_for 'DIAG-END' $((30 * K)) || echo "(no diagnostics: the login on tty2 did not take the keys)"
   tr -d '\000\r' < "$SER" | sed -n '/DIAG-START/,/DIAG-END/p' | tail -100
+  # run the kiosk by hand on this (active) tty with all its output captured: the unit restarts every ~12 s without a word
+  python3 "$HERE/qmp.py" "$QMP" type '( systemctl stop odjezdy-kiosk; timeout 30 cage -m extend -- /usr/bin/odjezdy-board-wl > /tmp/k.log 2>&1; echo KLOG-START; grep -v "drm.c\|pci id" /tmp/k.log | cut -c1-200 | head -90; echo KLOG-END ) > /dev/ttyS0 2>&1\n'
+  wait_for 'KLOG-END' $((90 * K)) || echo "(no KLOG)"
+  tr -d '\000\r' < "$SER" | sed -n '/KLOG-START/,/KLOG-END/p' | head -100
   S1=$(stat -c %s "$TMP/vt1.png"); S2=$(stat -c %s "$TMP/vt2.png")
   echo "tty1 shot: $S1 bytes, tty2 shot: $S2 bytes"
   [ -n "${SMOKE_KEEP:-}" ] && cp "$TMP/vt1.png" "${SMOKE_KEEP%.png}-vt1.png"
