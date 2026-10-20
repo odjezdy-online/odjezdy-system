@@ -732,8 +732,16 @@ function noteAlert(a) {
   const ot = cleanText(a.originalTitle || a.title);
   if (ot && !original.startsWith(ot.replace(/\s*(\.\.\.|…)$/, ''))) original = ot + (original ? ': ' + original : '');
   if (original && original === details) original = '';
-  (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '', original: original.slice(0, 600), source: a.sourceName || '' });
+  // links the source gave (the page of the notice, attached PDFs): shown as short text, nobody can click on a board
+  const host = (u) => { try { const x = new URL(u); return x.hostname.replace(/^www\./, '') + (x.pathname.length > 1 ? x.pathname : ''); } catch { return ''; } };
+  const names = [...new Set((a.attachments || []).map((t) => cleanText(t.name).replace(/\.pdf$/i, '')).filter(Boolean))].slice(0, 4);
+  const links = [a.sourceUrl && 'Více: ' + host(a.sourceUrl), names.length && 'Přílohy: ' + names.join(', ')].filter(Boolean).join(' · ');
+  (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '', original: original.slice(0, 600), source: a.sourceName || '', links });
   return text;
+}
+// small print under a notice: the source's own wording and the links it gave
+function noticeFootnote(info) {
+  return [info.original && 'Původní znění' + (info.source ? ' (' + info.source + ')' : '') + ': ' + info.original, info.links].filter(Boolean).join('  ');
 }
 // the notice as one line for marquees: headline and details together (details repeating the headline are not doubled)
 function fullAlertText(text) {
@@ -1050,9 +1058,9 @@ function nativeDisruption(c, t, th) {
   let h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
   // the source's original wording, small, in whatever room is left
   const orig = [];
-  if (info.original) {
+  if (info.original || info.links) {
     let ocur = '';
-    for (const w of ('Původní znění' + (info.source ? ' (' + info.source + ')' : '') + ': ' + info.original).split(/\s+/)) {
+    for (const w of noticeFootnote(info).split(/\s+/)) {
       const n = ocur ? ocur + ' ' + w : w;
       if (c.measure(n, body, 20 * s) > c.w - 240 * s && ocur) { orig.push(ocur); ocur = w; } else ocur = n;
     }
@@ -1145,7 +1153,7 @@ function renderDisruption(m, t) {
   const room = Math.max(0, Math.floor((m.rows - big - 8 - lines.length * (nor + 3) - (info.valid ? sm + 4 : 0)) / (sm + 2)));
   const det = info.details ? wrapText(info.details, 'small', W - 16, Math.min(8, room)) : [];
   let h = big + 10 + lines.length * (nor + 3) + (det.length ? 4 + det.length * (sm + 2) : 0) + (info.valid ? sm + 4 : 0) + 6;
-  const orig = info.original ? wrapText('Původní znění' + (info.source ? ' (' + info.source + ')' : '') + ': ' + info.original, 'small', W - 16, Math.max(0, Math.min(4, Math.floor((m.rows - h - 8) / (sm + 2))))) : [];
+  const orig = info.original || info.links ? wrapText(noticeFootnote(info), 'small', W - 16, Math.max(0, Math.min(4, Math.floor((m.rows - h - 8) / (sm + 2))))) : [];
   if (orig.length && Math.floor((m.rows - h - 8) / (sm + 2)) > 0) h += 4 + orig.length * (sm + 2); else orig.length = 0;
   const y0 = Math.max(0, Math.floor((m.rows - h) / 2));
   for (let y = y0; y < y0 + h; y++) for (let x = 0; x < W; x++) m.set(x, y, 0);
@@ -2268,7 +2276,7 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
-    if (args.includes('--alert')) { const tx = args[args.indexOf('--alert') + 1]; state.alerts = [tx]; if (args.includes('--details')) state.alertInfo = new Map([[tx, { details: args[args.indexOf('--details') + 1], valid: 'Platí od 19. 10. do 31. 10.', original: args.includes('--original') ? args[args.indexOf('--original') + 1] : '', source: 'DÚK' }]]); t0 = Date.now() - 22000; }
+    if (args.includes('--alert')) { const tx = args[args.indexOf('--alert') + 1]; state.alerts = [tx]; if (args.includes('--details')) state.alertInfo = new Map([[tx, { details: args[args.indexOf('--details') + 1], valid: 'Platí od 19. 10. do 31. 10.', original: args.includes('--original') ? args[args.indexOf('--original') + 1] : '', source: 'DÚK', links: args.includes('--links') ? args[args.indexOf('--links') + 1] : '' }]]); t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
     if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.t0 = Date.now() - 83000; state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
