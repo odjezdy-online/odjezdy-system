@@ -90,4 +90,4 @@ function makeBoard(opts) {
   };
 }
 
-module.exports = { makeBoard };
+module.exports = { makeBoard, clockSvg };
