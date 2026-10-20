@@ -26,7 +26,8 @@ module.exports = {
 
     // header
     m.text(en ? 'Departures' : 'Odjezdy', 2, 2, 'normal', C.WHITE);
-    m.text(fitText(stopLabel(state.cfg.stop), 'normal', W - 140), 2 + textWidth('Departures', 'normal') + 10, 2, 'normal', C.AMBER);
+    { const nx = 2 + textWidth('Departures', 'normal') + 10, room = W - nx - textWidth('88:88:88', 'normal') - 8, nm = stopLabel(state.cfg.stop), fc = textWidth(nm, 'normal') <= room ? 'normal' : 'small';
+      m.text(fitText(nm, fc, room), nx, fc === 'small' ? 2 + Math.floor((nor - sm) / 2) : 2, fc, C.AMBER); }
     m.textRight(clockText(api), W - 2, 2, 'normal', C.GREEN);
     const hy = nor + 6;
     const kindW = textWidth('Trolejbus', 'small') + 6;
@@ -47,20 +48,23 @@ module.exports = {
       return;
     }
 
-    const rowH = nor + 4;
+    // the big face first; when it leaves fewer than 8 rows the rows are set in the small face (more departures, whole destinations)
+    let face = 'normal', fr = nor;
+    if (Math.floor((m.rows - top - sm - 6) / (nor + 4)) < 8) { face = 'small'; fr = sm; }
+    const rowH = fr + 4;
     const per = Math.max(1, Math.floor((m.rows - top - sm - 6) / rowH));
     const pg = paginate(deps.slice(0, per * 4), per, t, 8000);
     pg.items.forEach((d, k) => {
       const y = top + k * rowH;
       const [slot, cz, eng] = KIND[d.type] || ['GREY', 'Linka', 'Line'];
-      badge(m, api, en ? eng : cz, 2, y + 1, 'small', C[slot], 0, 2, kindW);
-      m.text(hhmm(new Date(d.plannedTime)), colTime, y, 'normal', d.delayMinutes >= 5 ? C.RED : C.AMBER);
-      m.text(fitText(String(d.line), 'normal', colDest - colLine - 4), colLine, y, 'normal', C[slot]);
+      badge(m, api, en ? eng : cz, 2, y + (face === 'small' ? 0 : 1), 'small', C[slot], 0, 2, kindW);
+      m.text(hhmm(new Date(d.plannedTime)), colTime, y, face, d.delayMinutes >= 5 ? C.RED : C.AMBER);
+      m.text(fitText(String(d.line), face, colDest - colLine - 4), colLine, y, face, C[slot]);
       const plat = api.platMark(d);
       const destMax = W - colDest - platW - 6;
       const dest = d.delayMinutes > 0 ? `${d.destination}  ${en ? `delay ${d.delayMinutes} min` : `zpožď. ${d.delayMinutes} min`}` : d.destination;
-      m.text(fitText(dest || '', 'normal', destMax), colDest, y, 'normal', C.WHITE);
-      if (plat) m.textRight(fitText(plat, 'normal', platW), W - 2, y, 'normal', C.AMBER);
+      m.text(fitText(dest || '', face, destMax), colDest, y, face, C.WHITE);
+      if (plat) m.textRight(fitText(plat, face, platW), W - 2, y, face, C.AMBER);
     });
 
     // bottom ticker: disruptions / status, like the scrolling info line on JR boards

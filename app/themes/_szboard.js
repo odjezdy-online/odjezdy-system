@@ -52,7 +52,7 @@ function makeBoard(opts) {
       c.rect(24 * s, (colY + 10) * s, W - 48 * s, Math.max(1, 2 * s), P.rule);
       // ---- rows
       const deps = api.upcoming();
-      const top = colY + 18, rowH = 86, foot = 34, per = Math.max(1, Math.floor((H / s - top - foot) / rowH));
+      const top = colY + 18, rowH = opts.rowH || 86, k = rowH / 86, foot = 34, per = Math.max(1, Math.floor((H / s - top - foot) / rowH));
       if (!deps.length) {
         T(state.lastOk ? 'Žádné odjezdy' : state.error ? 'Nelze načíst odjezdy' : 'Načítám odjezdy…', W / 2 / s, top + 150, 60, P.ink, { font: F.bold, align: 'center' });
       }
@@ -64,25 +64,25 @@ function makeBoard(opts) {
         const cat = rail ? String(d.category || (CAT.test(String(d.line)) ? d.line : '') || '').trim() : '';
         // kind (category for trains, the line for everything else)
         const kind = rail ? (cat || d.line || '') : String(d.line ?? '');
-        T(kind, X.kind, y + 44, rail ? 40 : 38, cancelled ? P.late : P.ink, { font: F.bold, maxW: 105 * s });
+        T(kind, X.kind, y + 44 * k, (rail ? 40 : 38) * k, cancelled ? P.late : P.ink, { font: F.bold, maxW: 105 * s });
         // second line of the destination block: number · line · operator · via, or the notice (orange "šot")
         const n = api.depNotice(d);
         const op = d.operator || api.providerLabel(d);
         const info = [rail && d.trainNumber ? String(d.trainNumber) : '', rail && d.line && d.line !== cat ? d.line : '', rail ? op : '',
           d.via?.length ? 'přes ' + d.via.slice(0, 3).join(', ') : ''].filter(Boolean).join('  ·  ');
         const destMax = X.time - 210 - X.dest;
-        T(String(d.destination || 'cíl neuveden').toUpperCase(), X.dest, y + 42, 44, cancelled ? P.late : P.ink, { font: F.bold, maxW: destMax * s });
-        if (cancelled) T('ZRUŠEN', X.dest, y + 72, 24, P.late, { font: F.bold });
-        else if (n) T(n.text, X.dest, y + 72, 24, P.time, { maxW: destMax * s });
-        else if (info) T(info, X.dest, y + 72, 24, P.row2, { maxW: destMax * s });
+        T(String(d.destination || 'cíl neuveden').toUpperCase(), X.dest, y + 42 * k, 44 * k, cancelled ? P.late : P.ink, { font: F.bold, maxW: destMax * s });
+        if (cancelled) T('ZRUŠEN', X.dest, y + 72 * k, 24 * k, P.late, { font: F.bold });
+        else if (n) T(n.text, X.dest, y + 72 * k, 24 * k, P.time, { maxW: destMax * s });
+        else if (info) T(info, X.dest, y + 72 * k, 24 * k, P.row2, { maxW: destMax * s });
         // departure: planned time, "očekávaný hh:mm" when late
         const when = hhmm(new Date(d.plannedTime || depTime(d)));
         const blink = minutesTo(d) <= 0 && !cancelled && Math.floor(Date.now() / 500) % 2;
-        T(when, X.time, y + 44, 46, cancelled ? P.late : blink ? P.bg : P.time, { font: F.bold, align: 'right' });
-        if (delay && !cancelled) T(`očekávaný ${hhmm(new Date(depTime(d)))}`, X.time, y + 72, 22, P.late, { align: 'right' });
-        else if (d.delayMinutes === 0 && !cancelled) T('včas', X.time, y + 72, 22, P.ok, { align: 'right' });
+        T(when, X.time, y + 44 * k, 46 * k, cancelled ? P.late : blink ? P.bg : P.time, { font: F.bold, align: 'right' });
+        if (delay && !cancelled) T(`očekávaný ${hhmm(new Date(depTime(d)))}`, X.time, y + 72 * k, 22 * k, P.late, { align: 'right' });
+        else if (d.delayMinutes === 0 && !cancelled) T('včas', X.time, y + 72 * k, 22 * k, P.ok, { align: 'right' });
         // platform
-        if (plat) T(plat, X.plat, y + 44, 44, P.ink, { font: F.bold, align: 'right' });
+        if (plat) T(plat, X.plat, y + 44 * k, 44 * k, P.ink, { font: F.bold, align: 'right' });
         c.rect(24 * s, (y + rowH - 8) * s, W - 48 * s, Math.max(1, s), P.rule);
       });
       T(api.statusText() + (pages > 1 ? `   ${pg + 1}/${pages}` : ''), 32, H / s - 10, 18, P.dim, { maxW: W - 64 * s });
