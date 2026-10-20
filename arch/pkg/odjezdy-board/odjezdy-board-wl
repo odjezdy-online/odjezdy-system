@@ -5,13 +5,16 @@ export TZ=Europe/Prague
 export ODJEZDY_WL_SOCK="${XDG_RUNTIME_DIR:-/tmp}/odjezdy-wl.sock"
 APP=/opt/odjezdy
 
+echo "odjezdy-board-wl: start, WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-?}" >&2
 /usr/lib/odjezdy/odjezdy-wl "$ODJEZDY_WL_SOCK" >/dev/null &
 WL=$!
 i=0
 while [ ! -S "$ODJEZDY_WL_SOCK" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
 if [ ! -S "$ODJEZDY_WL_SOCK" ]; then echo "odjezdy-board-wl: odjezdy-wl did not start" >&2; kill $WL 2>/dev/null; exit 1; fi
 
+echo "odjezdy-board-wl: helper socket up after ${SECONDS}s, starting the board" >&2
 node "$APP/board.js"
 rc=$?
+echo "odjezdy-board-wl: board exited with $rc after ${SECONDS}s" >&2
 kill $WL 2>/dev/null
 exit $rc
