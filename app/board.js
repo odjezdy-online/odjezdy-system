@@ -727,7 +727,12 @@ function noteAlert(a) {
   // full description (the source's own text, e.g. DÚK), so notices are not cut off
   let details = cleanText(a.details);
   if (!details && /(\.\.\.|…)$/.test(text) && (a.description || a.text)) details = cleanText(a.description || a.text).slice(0, 420);
-  (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '' });
+  // the source's own wording (DÚK / SŽ / ČD / PID …), unchanged, shown under the summary when there is room
+  let original = cleanText(a.originalText || a.text || a.description);
+  const ot = cleanText(a.originalTitle || a.title);
+  if (ot && !original.startsWith(ot.replace(/\s*(\.\.\.|…)$/, ''))) original = ot + (original ? ': ' + original : '');
+  if (original && original === details) original = '';
+  (state.alertInfo ||= new Map()).set(text, { details, valid: validityText(a), kind: a.kind || '', original: original.slice(0, 600), source: a.sourceName || '' });
   return text;
 }
 // the notice as one line for marquees: headline and details together (details repeating the headline are not doubled)
@@ -742,7 +747,7 @@ async function fetchBoardRows(ids) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
       // PID notices from the departure board itself (infotexts: inline strip / full-screen) plus our alerts
-      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...(j.alerts || []).filter(alertActive).filter((al) => {
+      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...[...(j.alerts || []), ...(j.relatedAlerts || [])].filter(alertActive).filter((al) => {
         // an alert that names no stops and was matched by line number only belongs to this stop only when a departure
         // of the alert's own operator runs here (a DÚK alert about U1/R15 must not follow ČD's R15 to Praha)
         const provs = new Set((j.data || []).map((d) => d.provider));
@@ -1042,7 +1047,19 @@ function nativeDisruption(c, t, th) {
   }
   if (dcur) detailLines.push(dcur);
   const shown = lines.slice(0, 5), det = detailLines.slice(0, Math.max(5, Math.floor((c.h - 110 * s - shown.length * 42 * s - 100 * s) / (34 * s))));
-  const h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
+  let h = 110 * s + shown.length * 42 * s + (det.length ? 12 * s + det.length * 34 * s : 0) + (info.valid ? 40 * s : 0);
+  // the source's original wording, small, in whatever room is left
+  const orig = [];
+  if (info.original) {
+    let ocur = '';
+    for (const w of ('Původní znění' + (info.source ? ' (' + info.source + ')' : '') + ': ' + info.original).split(/\s+/)) {
+      const n = ocur ? ocur + ' ' + w : w;
+      if (c.measure(n, body, 20 * s) > c.w - 240 * s && ocur) { orig.push(ocur); ocur = w; } else ocur = n;
+    }
+    if (ocur) orig.push(ocur);
+    orig.splice(Math.max(0, Math.min(5, Math.floor((c.h * 0.94 - h - 10 * s) / (27 * s)))));
+    if (orig.length) h += 10 * s + orig.length * 27 * s;
+  }
   const y0 = (c.h - h) / 2;
   overlayRect = { x: 60 * s, y: y0, w: c.w - 120 * s, h };
   c.roundRect(60 * s, y0, c.w - 120 * s, h, 14 * s, [255, 255, 255]);
@@ -1051,7 +1068,8 @@ function nativeDisruption(c, t, th) {
   let yy = y0 + 112 * s;
   shown.forEach((l) => { c.text(l, 110 * s, yy, { font, size: 30 * s, color: [20, 20, 40] }); yy += 42 * s; });
   if (det.length) { yy += 12 * s - 6 * s; det.forEach((l) => { c.text(l, 110 * s, yy, { font: body, size: 24 * s, color: [70, 70, 90] }); yy += 34 * s; }); }
-  if (info.valid) c.text(info.valid, 110 * s, yy + 8 * s, { font, size: 24 * s, color: [236, 0, 22] });
+  if (info.valid) { c.text(info.valid, 110 * s, yy + 8 * s, { font, size: 24 * s, color: [236, 0, 22] }); yy += 40 * s; }
+  if (orig.length) { yy += 6 * s; orig.forEach((l) => { c.text(l, 110 * s, yy, { font: body, size: 20 * s, color: [110, 110, 125] }); yy += 27 * s; }); }
 }
 
 function renderBoard(m, t) {
@@ -1124,9 +1142,11 @@ function renderDisruption(m, t) {
   const W = m.cols, big = face('big').rows, nor = face('normal').rows;
   const info = state.alertInfo?.get(text) || {}, sm = face('small').rows;
   const lines = wrapText(text, 'normal', W - 16, Math.max(2, Math.min(5, Math.floor((m.rows - big - 30) / (nor + 3)) - 2)));
-  const room = Math.max(0, Math.floor((m.rows - big - 20 - lines.length * (nor + 3) - (info.valid ? sm + 4 : 0)) / (sm + 2)));
+  const room = Math.max(0, Math.floor((m.rows - big - 8 - lines.length * (nor + 3) - (info.valid ? sm + 4 : 0)) / (sm + 2)));
   const det = info.details ? wrapText(info.details, 'small', W - 16, Math.min(8, room)) : [];
-  const h = big + 10 + lines.length * (nor + 3) + (det.length ? 4 + det.length * (sm + 2) : 0) + (info.valid ? sm + 4 : 0) + 6;
+  let h = big + 10 + lines.length * (nor + 3) + (det.length ? 4 + det.length * (sm + 2) : 0) + (info.valid ? sm + 4 : 0) + 6;
+  const orig = info.original ? wrapText('Původní znění' + (info.source ? ' (' + info.source + ')' : '') + ': ' + info.original, 'small', W - 16, Math.max(0, Math.min(4, Math.floor((m.rows - h - 8) / (sm + 2))))) : [];
+  if (orig.length && Math.floor((m.rows - h - 8) / (sm + 2)) > 0) h += 4 + orig.length * (sm + 2); else orig.length = 0;
   const y0 = Math.max(0, Math.floor((m.rows - h) / 2));
   for (let y = y0; y < y0 + h; y++) for (let x = 0; x < W; x++) m.set(x, y, 0);
   m.hline(0, W - 1, y0, C.RED);
@@ -1138,6 +1158,7 @@ function renderDisruption(m, t) {
   yy += det.length ? 4 : 0;
   det.forEach((l) => { m.textCenter(l, yy, 'small', C.AMBER); yy += sm + 2; });
   if (info.valid) m.textCenter(info.valid, yy + 2, 'small', C.RED);
+  if (orig.length) { yy += info.valid ? sm + 6 : 2; orig.forEach((l) => { m.textCenter(l, yy, 'small', C.DIM); yy += sm + 2; }); }
   if (list.length > 1) m.textRight(`${slot.i + 1}/${list.length}`, W - 3, y0 + 4, 'small', C.DIM);
   return true;
 }
@@ -2247,7 +2268,7 @@ async function main() {
         browsePick(browseVisible()[0]);
       }
     }
-    if (args.includes('--alert')) { const tx = args[args.indexOf('--alert') + 1]; state.alerts = [tx]; if (args.includes('--details')) state.alertInfo = new Map([[tx, { details: args[args.indexOf('--details') + 1], valid: 'Platí od 19. 10. do 31. 10.' }]]); t0 = Date.now() - 22000; }
+    if (args.includes('--alert')) { const tx = args[args.indexOf('--alert') + 1]; state.alerts = [tx]; if (args.includes('--details')) state.alertInfo = new Map([[tx, { details: args[args.indexOf('--details') + 1], valid: 'Platí od 19. 10. do 31. 10.', original: args.includes('--original') ? args[args.indexOf('--original') + 1] : '', source: 'DÚK' }]]); t0 = Date.now() - 22000; }
     if (args.includes('--update')) { state.update = { info: { version: '9.9.9', notes: "## What's Changed\n* Arch installer json by @VlastikYoutubeKo in https://github.com/x/y/pull/7\n* Dopravce a zastávky přes u spojů\n* Volba Stránkování: jen první stránka, bez přepínání\n**Full Changelog**: https://github.com/a/b/compare/v1...v2", size: 4200000 } }; openUpdate(false); }
     if (args.includes('--install')) { openInstall(); await new Promise((r) => setTimeout(r, 1500)); const step = args[args.indexOf('--install') + 1]; if (step && step !== 'progress' && step !== 'done') { installGo(step); if (step === 'confirm') state.inst.typed = 'AN'; if (step === 'timezone') state.inst.filter = 'eu'; } if (step === 'progress') { state.inst.t0 = Date.now() - 83000; state.inst.step = 'progress'; state.inst.ev = { stage: 'pacstrap', progress: 0.47, message: 'Instaluji balíčky (182 z 391)' }; } if (step === 'done') { state.inst.step = 'done'; state.inst.until = Date.now() + 102000; state.inst.rebooting = true; state.inst.rootPass = 'kbmtrwshec'; } }
     if (args.includes('--wifi')) { openWifi(); await new Promise((r) => setTimeout(r, 1500)); if (args[args.indexOf('--wifi') + 1] === 'pass') { state.wifi.sel = 1; state.wifi.step = 'pass'; state.wifi.pass = 'tajne12'; } }
