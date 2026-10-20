@@ -13,6 +13,9 @@ After=getty@tty1.service
 [Service]
 Environment=TZ=Europe/Prague
 Environment=ODJEZDY_VT=tty1
+# VMs and simple GPUs have no GLES: the CPU renderer is all a board needs (and no hardware cursor planes there)
+Environment=WLR_RENDERER=pixman
+Environment=WLR_NO_HARDWARE_CURSORS=1
 ExecStart=/usr/bin/cage -m extend -s -- /usr/bin/odjezdy-board-wl
 PAMName=odjezdy-kiosk
 UtmpIdentifier=tty1
