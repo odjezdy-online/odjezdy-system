@@ -228,7 +228,14 @@ const hits = []; // clickable rows registered by the menus each frame: { x0, y0,
 const perf = { frames: 0, render: 0, convert: 0, write: 0, bytes: 0, lagMax: 0, since: Date.now(), last: null };
 function perfSummary() {
   const dt = Math.max(1, Date.now() - perf.since) / 1000, f = Math.max(1, perf.frames);
-  return `${(perf.frames / dt).toFixed(1)} fps | render ${(perf.render / f).toFixed(0)} ms | conv ${(perf.convert / f).toFixed(0)} ms | write ${(perf.write / dt * 1000 / Math.max(1, perf.frames)).toFixed(0)} ms/frame, ${(perf.bytes / dt / 1024).toFixed(0)} KB/s | lag max ${perf.lagMax} ms | scale 1/${qualityFactor}`;
+  return `${(perf.frames / dt).toFixed(1)} fps | render ${(perf.render / f).toFixed(0)} ms | conv ${(perf.convert / f).toFixed(0)} ms | write ${(perf.write / dt * 1000 / Math.max(1, perf.frames)).toFixed(0)} ms/frame, ${(perf.bytes / dt / 1024).toFixed(0)} KB/s | lag max ${perf.lagMax} ms | scale 1/${qualityFactor} | ${memInfo()}`;
+}
+// memory for the V overlay / log: this process (RSS) and what the system still has free, plus uptime of the board (a frozen board
+// keeps its last frame, so the last numbers show what happened)
+function memInfo() {
+  let avail = '?';
+  try { avail = Math.round(Number(/MemAvailable:s+(d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1024) + ' MB'; } catch {}
+  return `RSS ${Math.round(process.memoryUsage().rss / 1048576)} MB | free ${avail} | up ${Math.round((Date.now() - bootAt) / 60000)} min`;
 }
 function perfTick() {
   perf.last = perfSummary();
