@@ -135,6 +135,22 @@ const N = {
 };
 const F = { reg: 'FiraSans-Regular', semi: 'FiraSans-SemiBold', bold: 'FiraSans-Bold' };
 const TRAIN = '\uE000';
+const BERLIN = {
+  S1: [222, 77, 164], S15: [222, 77, 164], S2: [0, 95, 39], S25: [0, 95, 39], S26: [0, 95, 39], S3: [10, 76, 153], S41: [162, 59, 30], S42: [199, 110, 0],
+  S45: [195, 135, 55], S46: [195, 135, 55], S47: [195, 135, 55], S5: [255, 88, 0], S7: [111, 78, 156], S75: [111, 78, 156], S8: [85, 168, 34], S85: [85, 168, 34], S9: [138, 15, 48],
+  U1: [125, 173, 76], U2: [218, 66, 30], U3: [22, 104, 61], U4: [240, 215, 34], U5: [126, 83, 48], U6: [140, 109, 171], U7: [0, 155, 213], U8: [34, 79, 134], U9: [243, 121, 31],
+  RB10: [102, 170, 34], RE3: [235, 116, 5], RE8: [2, 132, 133],
+};
+// the badge above the time: a coloured pill for S/U/RB/RE lines (S and U fully round, regional a rounded box), grey box with the
+// train name for long-distance trains ("ICE 905"), exactly as bahnhof.de draws them
+function badgeStyle(d, N, berlin) {
+  const line = String(d.line || '').replace(/\s+/g, '').toUpperCase();
+  const known = berlin ? BERLIN[line] : null; // the colours are Berlin's; elsewhere the generic ones
+  if (/^S\d+$/.test(line) || /^U\d+$/.test(line)) return { label: line, bg: known || (line[0] === 'S' ? N.sbahn : N.metro), fg: line === 'U4' ? N.ink : N.white, radius: 999 };
+  if (/^(RB|RE|R)\d+$/.test(line)) return { label: line, bg: known || [2, 132, 133], fg: N.white, radius: 7 };
+  if (/^M\d+$/.test(line)) return { label: line, bg: N.tram, fg: N.white, radius: 3 };
+  return { label: d.train || String(d.line), bg: [68, 77, 96], fg: N.white, radius: 3.5 };
+}
 const KINDS = [['Fern', /^(ICE|IC|EC|EN|NJ|RJ|rj|RJX|SC|Ex|LE|ES)\b/], ['Regio', /^(R|RE|RB|Os|Sp|IRE|U\d|L\d)/], ['S-Bahn', /^S\s?\d/]];
 
 function pill(c, x, yTop, label, bg, fg, s, size = 17, radius = 999) {
@@ -164,10 +180,10 @@ function nativeRender(c, t, api) {
   const kinds = new Set(deps.map((d) => kindOf(d)));
   for (const k of ['Fern', 'Regio', 'S-Bahn', 'U-Bahn', 'Tram', 'Bus', 'Fähre']) {
     if (!kinds.has(k)) continue;
-    const ic = { Fern: [[255, 205, 0], N.ink, TRAIN], Regio: [[0, 128, 120], N.white, 'R'], 'S-Bahn': [[64, 140, 58], N.white, 'S'], Bus: [[196, 35, 120], N.white, 'BUS'], Fähre: [[40, 120, 220], N.white, 'E'] }[k];
+    const ic = { Fern: [[255, 205, 0], N.ink, TRAIN], Regio: [[0, 128, 120], N.white, 'R'], 'S-Bahn': [[64, 140, 58], N.white, 'S'], Bus: [[196, 35, 120], N.white, 'BUS'], Fähre: [[40, 120, 220], N.white, 'E'], 'U-Bahn': [[20, 90, 200], N.white, 'U'], Tram: [[220, 20, 40], N.white, 'T'] }[k];
     if (ic) {
       const d0 = 22 * s;
-      c.roundRect(bx, 138 * s, d0, d0, k === 'Fähre' ? 3 * s : d0 / 2, ic[0]);
+      c.roundRect(bx, 138 * s, d0, d0, k === 'Fähre' || k === 'U-Bahn' || k === 'Tram' ? 3 * s : d0 / 2, ic[0]);
       c.text(ic[2], bx + d0 / 2, 138 * s + d0 * (ic[2] === 'BUS' ? 0.66 : 0.74), { font: F.bold, size: (ic[2] === 'BUS' ? 9 : 15) * s, color: ic[1], align: 'center' });
       bx += d0 + 8 * s;
     }
@@ -204,10 +220,9 @@ function nativeRender(c, t, api) {
     const n = depNotice(d);
     if (rail) {
       // badge above the time
-      const label = d.train || String(d.line);
-      const sb = /^S\s?\d/.test(String(d.line));
+      const bst = badgeStyle(d, N, /Berlin/i.test(`${stopLabel(state.cfg.stop)} ${state.cfg.stop?.city || ''}`)), label = bst.label;
       const bw = c.measure(label, F.bold, 15 * s) + 14 * s;
-      pill(c, colL - bw, y + 14 * s, label, sb ? N.sbahn : N.grey, N.white, s, 15, sb ? 999 : 3);
+      pill(c, colL - bw, y + 14 * s, label, bst.bg, bst.fg, s, 15, bst.radius);
       const planned = hhmm(new Date(d.plannedTime));
       let tx = colL;
       if (d.delayMinutes > 0) {
@@ -229,8 +244,11 @@ function nativeRender(c, t, api) {
       // chips row: "i" when the train has information (notice / delay), as on the page
       if (n || d.delayMinutes > 0 || d.cancelled) { c.roundRect(colM, y + 8 * s, 20 * s, 20 * s, 2 * s, N.white); c.text('i', colM + 10 * s, y + 24 * s, { font: F.bold, size: 15 * s, color: N.ink, align: 'center' }); }
       const ov = c.fit(over, F.semi, 14 * s, midEnd - colM - opW - 36 * s), cut = ov !== over;
-      c.text(ov, colM, y + 50 * s, { font: n ? F.semi : F.semi, size: 14 * s, color: n ? N.yellow : N.white });
-      if (cut) { const cx = colM + c.measure(ov, F.semi, 14 * s) + 6 * s; c.roundRect(cx, y + 36 * s, 26 * s, 18 * s, 3 * s, N.chip); c.text('…', cx + 13 * s, y + 47 * s, { font: F.bold, size: 14 * s, color: N.white, align: 'center' }); }
+      let vx = colM;
+      const mcity = !n && /^(Berlin|Hamburg|Wien|München|Köln|Praha) /.exec(ov);
+      if (mcity) { c.text(mcity[1], vx, y + 50 * s, { font: F.reg, size: 12 * s, color: N.white }); vx += c.measure(mcity[1] + ' ', F.reg, 12 * s); }
+      c.text(mcity ? ov.slice(mcity[0].length) : ov, vx, y + 50 * s, { font: F.semi, size: 14 * s, color: n ? N.yellow : N.white });
+      if (cut) { const cx = vx + c.measure(mcity ? ov.slice(mcity[0].length) : ov, F.semi, 14 * s) + 6 * s; c.roundRect(cx, y + 36 * s, 26 * s, 18 * s, 3 * s, N.chip); c.text('…', cx + 13 * s, y + 47 * s, { font: F.bold, size: 14 * s, color: N.white, align: 'center' }); }
       c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 82 * s, { font: F.semi, size: 28 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 130 * s });
       const info = n || d.delayMinutes > 0 || d.cancelled ? 'Fahrtinformationen' : '';
       if (info) { const iw = c.measure(info, F.semi, 12 * s) + 14 * s; c.roundRect(midEnd - iw, y + 62 * s, iw, 22 * s, 3 * s, N.chip); c.text(info, midEnd - iw / 2, y + 77 * s, { font: F.semi, size: 12 * s, color: N.white, align: 'center' }); }
