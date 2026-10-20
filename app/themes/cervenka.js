@@ -15,10 +15,10 @@ module.exports = makeHall({
     { t: 'CÍLOVÁ STANICE  -  Směr jízdy', x: 190, y: 132, size: 22, color: WHITE },
     { t: 'Pravidelný', x: 880, y: 116, size: 14, color: WHITE }, { t: 'odjezd', x: 880, y: 132, size: 14, color: WHITE },
     { t: 'Nást.', x: 1010, y: 132, size: 14, color: WHITE }, { t: 'Kolej', x: 1090, y: 132, size: 14, color: WHITE },
-    { t: 'Zpoždění', x: 1190, y: 116, size: 14, color: WHITE }, { t: 'min', x: 1190, y: 132, size: 14, color: WHITE },
+    { t: 'Zpoždění', x: 1214, y: 116, size: 14, color: WHITE, align: 'center' }, { t: 'min', x: 1214, y: 132, size: 14, color: WHITE, align: 'center' },
   ],
   top: 146, bottom: 14, group: 2, bandGap: 20, minRow: 60, maxRow: 84, tick: (f) => (f.rail && /^(R|Ex|EC|IC|rj|RJ|SC|EN|AEx|Sp)$/.test(f.kind) ? RED : null), noCancelTag: true,
   cols: [
-    { key: 'kind', x: 54 }, { key: 'destvia', x: 190, maxW: 660 }, { key: 'time', x: 880 }, { key: 'plat', x: 1010 }, { key: 'track', x: 1090 }, { key: 'delay', x: 1232, align: 'right' },
+    { key: 'kind', x: 54 }, { key: 'destvia', x: 190, maxW: 660 }, { key: 'time', x: 880 }, { key: 'plat', x: 1010 }, { key: 'track', x: 1090 }, { key: 'delay', x: 1214, align: 'center' },
   ],
 });
