@@ -9,14 +9,17 @@
 #       {"error":"...","stage":"..."}        (and a non-zero exit code)
 #     everything the tools print goes to /var/log/odjezdy-install.log instead
 #
-#   odjezdy-install --options --json         what the image offers: locales, keymaps, time zones
+#   odjezdy-install --options --json         what the image offers: locales, keymaps, time zones, desktops
 #
 # Options: --hostname NAME  --root-password PW  --yes  --json  --list-disks  --options
 #          --locale cs_CZ.UTF-8  --keymap cz  --timezone Europe/Prague
+#          --desktop none|kiosk|plasma|gnome|xfce   none (default) = appliance: the board on tty1 straight to the
+#              framebuffer/KMS. Anything else installs a Wayland kiosk (cage) with the board on tty1 and, on tty2,
+#              a login / the chosen desktop (user "odjezdy", password = the root password); Ctrl+Alt+F1/F2 switch.
 set -Eeuo pipefail
 
 DISK=""; HOST="odjezdy"; YES=0; ROOTPW=""; JSON=0; LIST=0; OPTS=0
-LOCALE="cs_CZ.UTF-8"; KEYMAP="cz-qwertz"; TZ_NAME="Europe/Prague"
+LOCALE="cs_CZ.UTF-8"; KEYMAP="cz-qwertz"; TZ_NAME="Europe/Prague"; DESKTOP="none"
 LOG=/var/log/odjezdy-install.log
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -30,7 +33,8 @@ while [ $# -gt 0 ]; do
     --locale) LOCALE="$2"; shift 2 ;;
     --keymap) KEYMAP="$2"; shift 2 ;;
     --timezone) TZ_NAME="$2"; shift 2 ;;
-    -h|--help) sed -n 2,17p "$0"; exit 0 ;;
+    --desktop) DESKTOP="$2"; shift 2 ;;
+    -h|--help) sed -n 2,22p "$0"; exit 0 ;;
     *) echo "Neznámý parametr: $1" >&2; exit 2 ;;
   esac
 done
@@ -126,6 +130,12 @@ it|Italská
 sl|Slovinská
 hr|Chorvatská'
 
+DESKTOP_NAMES='none|Spotřebič (tabule na tty1)
+kiosk|Wayland kiosk (tabule + přihlášení na tty2)
+plasma|KDE Plasma
+gnome|GNOME
+xfce|XFCE'
+
 keymap_exists() { find /usr/share/kbd/keymaps -name "$1.map*" 2>/dev/null | grep -q .; }
 locale_exists() { grep -qE "^#?${1//./\\.} UTF-8" /etc/locale.gen 2>/dev/null; }
 
@@ -151,6 +161,12 @@ list_options() {
     [ "$first" = 1 ] || printf ','; first=0
     jstr "$id"
   done
+  printf '],"desktops":['
+  first=1
+  while IFS='|' read -r id name; do
+    [ "$first" = 1 ] || printf ','; first=0
+    printf '{"id":%s,"name":%s}' "$(jstr "$id")" "$(jstr "$name")"
+  done <<<"$DESKTOP_NAMES"
   printf ']}\n'
 }
 
@@ -212,6 +228,7 @@ if [ "$YES" -ne 1 ]; then
 fi
 
 [[ "$HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || fail "Neplatný název počítače: $HOST"
+case "$DESKTOP" in none|kiosk|plasma|gnome|xfce) ;; *) fail "Neznámé prostředí: $DESKTOP (none, kiosk, plasma, gnome, xfce)." ;; esac
 locale_exists "$LOCALE" || fail "Jazyk $LOCALE není v obrazu k dispozici."
 keymap_exists "$KEYMAP" || fail "Rozložení klávesnice $KEYMAP není v obrazu k dispozici."
 [ -f "/usr/share/zoneinfo/$TZ_NAME" ] || fail "Časové pásmo $TZ_NAME neexistuje."
@@ -261,9 +278,27 @@ C
 # (progress bars) are split into lines. Progress comes from whatever shape pacman prints without a
 # terminal: "Packages (N) ...", "(12/391) installing x", "installing x...", "x downloading...".
 # When nothing parseable arrives for 20 s a heartbeat event keeps the bar creeping so it never looks frozen.
+# desktop mode: cage (kiosk on tty1), mesa (GPU drivers amdgpu/i915/nouveau/virtio; the board itself renders on the CPU),
+# the chosen desktop and its display manager; NVIDIA GPUs from Turing on (PCI device id >= 0x1e00) get the open kernel module
+DESK_PKGS=()
+case "$DESKTOP" in
+  kiosk)  DESK_PKGS=(cage mesa xf86-input-libinput) ;;
+  plasma) DESK_PKGS=(cage mesa xf86-input-libinput xorg-server plasma-desktop sddm konsole) ;;
+  gnome)  DESK_PKGS=(cage mesa xf86-input-libinput gnome-shell gdm gnome-console nautilus) ;;
+  xfce)   DESK_PKGS=(cage mesa xf86-input-libinput xorg-server xfce4 lightdm lightdm-gtk-greeter xfce4-terminal) ;;
+esac
+NVIDIA=0
+if [ "$DESKTOP" != none ]; then
+  for d in /sys/bus/pci/devices/*; do
+    [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] || continue
+    case "$(cat "$d/class" 2>/dev/null)" in 0x03*) ;; *) continue ;; esac
+    [ $(( $(cat "$d/device") )) -ge $(( 0x1e00 )) ] && NVIDIA=1
+  done
+  [ "$NVIDIA" -eq 0 ] || DESK_PKGS+=(nvidia-open nvidia-utils)
+fi
 stdbuf -oL -eL pacstrap -K -C /tmp/pacman-install.conf /mnt base linux linux-firmware-intel linux-firmware-amdgpu \
   linux-firmware-radeon linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek \
-  linux-firmware-broadcom intel-ucode amd-ucode kbd iwd nodejs odjezdy-board grub efibootmgr sudo nano 2>&1 \
+  linux-firmware-broadcom intel-ucode amd-ucode kbd iwd nodejs odjezdy-board grub efibootmgr sudo nano "${DESK_PKGS[@]}" 2>&1 \
   | stdbuf -oL tr '\r' '\n' \
   | {
       total=0; dl=0; inst=0; phase=resolve; prog=0.10; started=$SECONDS
@@ -306,7 +341,44 @@ printf 'KEYMAP=%s\nFONT=eurlatgr\n' "$KEYMAP" > /mnt/etc/vconsole.conf
 sed -i "s/^#\(${LOCALE//./\\.} UTF-8\)/\1/; s/^#\(en_US\.UTF-8 UTF-8\)/\1/" /mnt/etc/locale.gen
 install -Dm644 /etc/systemd/network/20-ethernet.network /mnt/etc/systemd/network/20-ethernet.network
 arch-chroot /mnt locale-gen >/dev/null
-arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-timesyncd iwd odjezdy-board >/dev/null
+arch-chroot /mnt systemctl enable systemd-networkd systemd-resolved systemd-timesyncd iwd >/dev/null
+if [ "$DESKTOP" = none ]; then
+  arch-chroot /mnt systemctl enable odjezdy-board >/dev/null
+else
+  # the board is a Wayland client under cage on tty1; a login or the chosen desktop waits on tty2
+  arch-chroot /mnt systemctl enable odjezdy-kiosk >/dev/null
+  arch-chroot /mnt systemctl set-default graphical.target >/dev/null
+  DM=""; DMDROP=""
+  case "$DESKTOP" in
+    plasma) DM=sddm
+      install -Dm644 /dev/stdin /mnt/etc/sddm.conf.d/10-odjezdy.conf <<'C'
+[X11]
+MinimumVT=2
+C
+      ;;
+    gnome) DM=gdm ;;
+    xfce) DM=lightdm
+      install -Dm644 /dev/stdin /mnt/etc/lightdm/lightdm.conf.d/10-odjezdy.conf <<'C'
+[LightDM]
+minimum-vt=2
+C
+      ;;
+  esac
+  if [ -n "$DM" ]; then
+    arch-chroot /mnt systemctl enable "$DM" >/dev/null
+    # the kiosk owns tty1 first, the display manager takes the next free VT
+    install -Dm644 /dev/stdin "/mnt/etc/systemd/system/$DM.service.d/odjezdy.conf" <<'C'
+[Unit]
+After=odjezdy-kiosk.service
+C
+  fi
+  [ "$NVIDIA" -eq 0 ] || echo 'options nvidia_drm modeset=1 fbdev=1' > /mnt/etc/modprobe.d/nvidia-odjezdy.conf
+  # a regular account for the desktop (display managers refuse root), same password as root
+  arch-chroot /mnt useradd -m -G wheel -s /bin/bash odjezdy
+  install -Dm440 /dev/stdin /mnt/etc/sudoers.d/10-wheel <<'C'
+%wheel ALL=(ALL:ALL) ALL
+C
+fi
 ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
 
 # what the user set up in the live session (stop, theme, Wi-Fi) goes with the system
@@ -324,9 +396,11 @@ done
 # service console on tty2: normal login
 if [ -n "$ROOTPW" ]; then
   echo "root:$ROOTPW" | arch-chroot /mnt chpasswd
+  [ "$DESKTOP" = none ] || echo "odjezdy:$ROOTPW" | arch-chroot /mnt chpasswd
 elif [ "$YES" -ne 1 ] && [ "$JSON" -eq 0 ]; then
   echo "Nastav heslo uživatele root (konzole na Alt+F2):"
   arch-chroot /mnt passwd root
+  if [ "$DESKTOP" != none ]; then echo "Nastav heslo uživatele odjezdy (přihlášení do prostředí na Alt+F2):"; arch-chroot /mnt passwd odjezdy; fi
 fi
 
 # --- boot loader ----------------------------------------------------------

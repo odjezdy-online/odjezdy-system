@@ -1,0 +1,32 @@
+[Unit]
+Description=Odjezdy board in a Wayland kiosk (cage) on tty1
+Documentation=https://odjezdy.online
+After=systemd-user-sessions.service systemd-logind.service dbus.socket network.target
+Wants=dbus.socket systemd-logind.service
+Conflicts=getty@tty1.service odjezdy-board.service
+After=getty@tty1.service
+
+# Desktop mode: the board is a fullscreen Wayland client on tty1, the display manager / a login runs on tty2
+# (Ctrl+Alt+F1 / F2 switch, the board keeps running). `cage -m extend` spreads the outputs, odjezdy-wl opens
+# one fullscreen window per output the board asks for. Enabled by odjezdy-install --desktop, instead of
+# odjezdy-board.service (the framebuffer variant).
+[Service]
+Environment=TZ=Europe/Prague
+Environment=ODJEZDY_VT=tty1
+ExecStart=/usr/bin/cage -m extend -s -- /usr/bin/odjezdy-board-wl
+PAMName=odjezdy-kiosk
+UtmpIdentifier=tty1
+UtmpMode=user
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StateDirectory=odjezdy
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

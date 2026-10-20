@@ -13,7 +13,7 @@ docker run --rm --privileged \
   -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || date +%s)}" \
   -e ODJEZDY_DU="${ODJEZDY_DU:-}" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
   archlinux:latest bash -euo pipefail -c '
-    pacman -Syu --noconfirm --needed archiso base-devel git grub mtools dosfstools libdrm >/dev/null
+    pacman -Syu --noconfirm --needed archiso base-devel git grub mtools dosfstools libdrm wayland wayland-protocols >/dev/null
     useradd -m builder 2>/dev/null || true
 
     # 1) package odjezdy-board into a local repo

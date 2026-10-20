@@ -6,17 +6,24 @@ pkgdesc='Framebuffer departure board for odjezdy.online (Odjezdy OS)'
 arch=('any')
 url='https://odjezdy.online'
 license=('MIT')
-depends=('nodejs' 'iwd' 'libdrm')
-makedepends=('gcc' 'pkgconf' 'libdrm')
+depends=('nodejs' 'iwd' 'libdrm' 'wayland')
+makedepends=('gcc' 'pkgconf' 'libdrm' 'wayland' 'wayland-protocols')
 # the app sources live next to arch/ in the repo; build.sh sets ODJEZDY_APP_DIR
-source=('odjezdy-board.service' 'odjezdy-board-run' 'odjezdy-wifi')
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+source=('odjezdy-board.service' 'odjezdy-board-run' 'odjezdy-wifi' 'odjezdy-kiosk.service' 'odjezdy-board-wl' 'odjezdy-kiosk.pam')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 # optional native helper that draws on several outputs (app/native/odjezdy-kms.c, libdrm dumb buffers)
 build() {
   local app="${ODJEZDY_APP_DIR:-$startdir/../../../app}"
   if [ -f "$app/native/odjezdy-kms.c" ]; then
     gcc -O2 -Wall -o "$srcdir/odjezdy-kms" "$app/native/odjezdy-kms.c" $(pkg-config --cflags --libs libdrm)
+  fi
+  # the same for Wayland desktops and the cage kiosk (app/native/odjezdy-wl.c, wl_shm + xdg-shell)
+  if [ -f "$app/native/odjezdy-wl.c" ]; then
+    local xml="$(pkg-config --variable=pkgdatadir wayland-protocols)/stable/xdg-shell/xdg-shell.xml"
+    wayland-scanner client-header "$xml" "$srcdir/xdg-shell-client-protocol.h"
+    wayland-scanner private-code "$xml" "$srcdir/xdg-shell-protocol.c"
+    gcc -O2 -Wall -I"$srcdir" -o "$srcdir/odjezdy-wl" "$app/native/odjezdy-wl.c" "$srcdir/xdg-shell-protocol.c" $(pkg-config --cflags --libs wayland-client)
   fi
 }
 
@@ -30,5 +37,12 @@ package() {
   if [ -x "$srcdir/odjezdy-kms" ]; then
     install -Dm755 "$srcdir/odjezdy-kms" "$pkgdir/usr/lib/odjezdy/odjezdy-kms"
   fi
+  if [ -x "$srcdir/odjezdy-wl" ]; then
+    install -Dm755 "$srcdir/odjezdy-wl" "$pkgdir/usr/lib/odjezdy/odjezdy-wl"
+  fi
+  # Wayland kiosk (installed systems with a desktop choice; not enabled by default)
+  install -Dm644 odjezdy-kiosk.service "$pkgdir/usr/lib/systemd/system/odjezdy-kiosk.service"
+  install -Dm644 odjezdy-kiosk.pam "$pkgdir/etc/pam.d/odjezdy-kiosk"
+  install -Dm755 odjezdy-board-wl "$pkgdir/usr/bin/odjezdy-board-wl"
   install -Dm755 odjezdy-wifi "$pkgdir/usr/bin/odjezdy-wifi"
 }

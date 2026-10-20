@@ -3,3 +3,6 @@ alpine/out/
 node_modules/
 *.ppm
 app/fonts/ttf/PragueCitizen-*.ttf
+app/native/odjezdy-kms
+app/native/odjezdy-wl
+app/native/xdg-shell-*

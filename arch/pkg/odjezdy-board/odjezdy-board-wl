@@ -1,0 +1,17 @@
+#!/bin/sh
+# Started by cage (odjezdy-kiosk.service): the output helper for Wayland and the board in one Wayland session.
+# systemd (and cage) restart everything when this exits.
+export TZ=Europe/Prague
+export ODJEZDY_WL_SOCK="${XDG_RUNTIME_DIR:-/tmp}/odjezdy-wl.sock"
+APP=/opt/odjezdy
+
+/usr/lib/odjezdy/odjezdy-wl "$ODJEZDY_WL_SOCK" >/dev/null &
+WL=$!
+i=0
+while [ ! -S "$ODJEZDY_WL_SOCK" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+if [ ! -S "$ODJEZDY_WL_SOCK" ]; then echo "odjezdy-board-wl: odjezdy-wl did not start" >&2; kill $WL 2>/dev/null; exit 1; fi
+
+node "$APP/board.js"
+rc=$?
+kill $WL 2>/dev/null
+exit $rc
