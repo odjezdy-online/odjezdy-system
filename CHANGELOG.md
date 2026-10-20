@@ -2,6 +2,13 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.11
+- U vlaků bez nástupiště se ukáže ikonka vlaku (ve všech vzhledech)
+- Číslo vlaku jako drobný text („Os 6925“, „č. 678“)
+- Názvy zastávek a cílů bez dvojitých čárek a se správnými mezerami („Ústí n.L. hl.n.“)
+- Dlouhá hodnota nástupiště („3 / kolej 2“) se zkrátí nebo vejde do odznaku
+- Opraveno: seznam v menu při pohybu myší nejel až nahoru
+
 ## 0.5.10
 - Oznámení ukáže odkaz na zdroj hlášení a názvy příloh (PDF), když je dopravce uvedl
 - Shrnutí hlášení teď vychází i z příloh dopravce (server)

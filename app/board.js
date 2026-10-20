@@ -1202,7 +1202,7 @@ const TRAIN = '\uE000';
 const isRailRow = (d) => d.type === 'train' || d.type === 'rail';
 const platMark = (d) => platformOf(d) || (isRailRow(d) ? TRAIN : '');
 // train number as small print: "Os 6920" when the line is only a category, "č. 244" next to a numbered line (U3, R15)
-const trainTag = (d) => (isRailRow(d) && d.trainNumber ? (/^[A-Za-z]{1,3}$/.test(String(d.line || '').trim()) ? `${String(d.line).trim()} ${d.trainNumber}` : `č. ${d.trainNumber}`) : '');
+const trainTag = (d) => (isRailRow(d) && d.trainNumber ? (/^[A-Za-z]{1,3}$/.test(String(d.line || '').trim()) ? `${String(d.line).trim()} ${d.trainNumber}` : /^[A-Za-z]{1,3}$/.test(String(d.category || '').trim()) ? `${String(d.category).trim()} ${d.trainNumber}` : `č. ${d.trainNumber}`) : '');
 const platLabel = (d, prefix = '') => { const p = platformOf(d); return p ? prefix + p : isRailRow(d) ? TRAIN : ''; };
 const themeApi = {
   platMark, platLabel, trainTag,
