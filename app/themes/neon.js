@@ -66,7 +66,7 @@ module.exports = {
       const destMax = x1 - timeW - colDest;
       c.text(d.cancelled ? `${d.destination} · odpadá` : d.destination || '', colDest, y + 48 * s, { font: F.bold, size: 38 * s, color: d.cancelled ? N.pink : N.white, maxW: destMax });
       const n = depNotice(d), plat = platformOf(d);
-      const sub = n ? n.text : [plat && `nást. ${plat}`, api.hasDelay(d) && api.delayLabel(d), d.via?.length && 'přes ' + d.via.slice(0, 3).join(', ')].filter(Boolean).join('  ·  ');
+      const sub = n ? n.text : [api.platLabel(d, 'nást. '), api.hasDelay(d) && api.delayLabel(d), d.via?.length && 'přes ' + d.via.slice(0, 3).join(', ')].filter(Boolean).join('  ·  ');
       c.text(sub, colDest, y + 74 * s, { font: F.med, size: 20 * s, color: n ? N.warn : N.dim, maxW: destMax });
     });
     if (pages > 1) c.text(`${pg + 1}/${pages}`, x1, H - 14 * s, { font: F.med, size: 18 * s, color: N.dim, align: 'right' });

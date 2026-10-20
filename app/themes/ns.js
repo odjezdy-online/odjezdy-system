@@ -49,7 +49,7 @@ module.exports = {
       const n = depNotice(d);
       const sub = n ? n.text : d.via?.length ? 'via ' + d.via.slice(0, 4).join(', ') : kind;
       c.text(sub, colDest, y + 76 * s, { font: n ? F.semi : F.reg, size: 19 * s, color: n ? N.band : N.dim, maxW: destMax });
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat) {
         c.roundRect(x1 - platW, y + 14 * s, platW, 46 * s, 4 * s, N.white);
         const fsz = Math.min(30 * s, (30 * s * (platW - 10 * s)) / Math.max(1, c.measure(plat, F.bold, 30 * s)));

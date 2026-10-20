@@ -94,7 +94,7 @@ module.exports = {
       // delay goes under the departure time on two-row departures; single-row fallback keeps a small "+N" before it
       const delayStr = !tall && hasDelay(d) ? (delay > 0 ? `+${delay}` : `${delay}`) : '';
       const dw = delayStr ? textWidth(delayStr, 'small') + 4 : 0;
-      const plat = d.platform && !/^(N\/A|Neznámé|unknown)$/i.test(d.platform) ? d.platform : '';
+      const plat = api.platMark(d);
       const pw = plat ? textWidth(plat, 'small') + 5 : 0;
       const destMax = colIn - minW - dw - pw - colDest - 4;
       m.text(fitText(d.destination || '', 'normal', destMax), colDest, y, 'normal', C.AMBER);

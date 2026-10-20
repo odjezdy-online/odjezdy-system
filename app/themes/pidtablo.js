@@ -109,7 +109,7 @@ module.exports = {
       if (cancelled) c.rect(X.dest, dy - 14 * s, Math.min(c.measure(dest, F.semi, 43 * s), dmax), 4 * s, K.red);
       if (via) T(via, X.dest, mid + 30 * s, 22, K.grey, { maxW: dmax });
       // platform (stand), low-floor symbol
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat) T(plat, platCx, mid + 14 * s, 40, K.grey, { align: 'center' });
       if ((d.lowFloor ?? d.isWheelchairAccessible) === true && ICON.accessible) c.svg(ICON.accessible, lfX - lfW + 6 * s, mid - 17 * s, 34 * s, 34 * s, { color: K.grey });
       // departure: green on time, orange delayed (+n), white with "?" when not tracked, red when cancelled

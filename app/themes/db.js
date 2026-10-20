@@ -83,7 +83,7 @@ function railBoard(m, t, api, deps, hy) {
     if (opW) m.textRight(api.providerLabel(d), midEnd, y + 1, 'small', C.DIM);
     const dest = d.cancelled ? `${d.destination}  · fällt aus` : d.destination || '';
     m.text(fitText(dest, 'normal', midEnd - colMid), colMid, yTime, 'normal', d.cancelled ? C.RED : C.AMBER);
-    const plat = platformOf(d);
+    const plat = api.platMark(d);
     if (plat) m.textRight(fitText(plat, 'normal', gleisW + 6), W - 3, yTime, 'normal', C.AMBER);
     // underline per column, like the screenshot
     const uy = y + rowH - 2;
@@ -220,7 +220,7 @@ function nativeRender(c, t, api) {
       }
       c.text(over, colM, y + 30 * s, { font: n ? F.semi : F.reg, size: 16 * s, color: n ? N.yellow : N.dim, maxW: midEnd - colM - opW - 10 * s });
       c.text(d.cancelled ? `${d.destination} — Fahrt fällt aus` : d.destination, colM, y + 66 * s, { font: F.semi, size: 30 * s, color: d.cancelled ? N.red : N.white, maxW: midEnd - colM - 10 * s });
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat) c.text(plat, colG, y + 66 * s, { font: F.semi, size: 30 * s, color: N.white, align: 'right' });
       const uy = y + rowH - 12 * s;
       c.hline(x0, colL, uy, N.white); c.hline(colM, midEnd, uy, N.white); c.hline(midEnd + 14 * s, colG, uy, N.white);

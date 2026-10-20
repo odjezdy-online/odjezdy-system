@@ -46,7 +46,7 @@ module.exports = {
       text(c,d.line,x,y+83*s,79*s,INK,145*s,'left',F.condensed);
       text(c,d.destination||'cíl neuveden',dest,y+53*s,40*s,INK,end-dest,'left',F.condensed);
       const plat=api.platformOf(d);
-      text(c,[subline(d,api),plat && 'Nást. '+plat].filter(Boolean).join(' · '),dest,y+91*s,18*s,DIM,end-dest);
+      text(c,[subline(d,api),api.platLabel(d,'Nást. ')].filter(Boolean).join(' · '),dest,y+91*s,18*s,DIM,end-dest);
       text(c,d.cancelled?'ODPADÁ':countdown(api,d,'TEĎ'),right,y+57*s,45*s,d.cancelled?accent:INK,200*s,'right',F.condensed);
       if(!d.cancelled)text(c,delay(d,api),right,y+94*s,21*s,accent,200*s,'right',F.bold);
       c.hline(x,right,y+row-8*s,INK,2*s);

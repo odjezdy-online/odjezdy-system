@@ -27,7 +27,7 @@ function simpleLed(m, t, api, { title } = {}) {
     m.text(fitText(String(d.line ?? ''), 'normal', lineW - 2), 2, y, 'normal', C.AMBER);
     const when = mins <= 0 ? '**' : mins < 60 ? `${mins} min` : hhmm(new Date(depTime(d)));
     m.textRight(when, W - 2, y, 'normal', mins <= 0 ? C.WHITE : C.AMBER);
-    const plat = platformOf(d), pw = plat ? textWidth(plat, 'small') + 6 : 0;
+    const plat = api.platMark(d), pw = plat ? textWidth(plat, 'small') + 6 : 0;
     if (plat) m.textRight(plat, W - 4 - timeW, y + 1, 'small', C.DIM);
     const destMax = W - 2 - timeW - pw - lineW - 8;
     m.text(fitText(d.destination || '', 'normal', destMax), lineW + 4, y, 'normal', C.AMBER);

@@ -56,7 +56,7 @@ module.exports = {
       badge(m, api, en ? eng : cz, 2, y + 1, 'small', C[slot], 0, 2, kindW);
       m.text(hhmm(new Date(d.plannedTime)), colTime, y, 'normal', d.delayMinutes >= 5 ? C.RED : C.AMBER);
       m.text(fitText(String(d.line), 'normal', colDest - colLine - 4), colLine, y, 'normal', C[slot]);
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       const destMax = W - colDest - platW - 6;
       const dest = d.delayMinutes > 0 ? `${d.destination}  ${en ? `delay ${d.delayMinutes} min` : `zpožď. ${d.delayMinutes} min`}` : d.destination;
       m.text(fitText(dest || '', 'normal', destMax), colDest, y, 'normal', C.WHITE);

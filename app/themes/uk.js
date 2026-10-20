@@ -67,11 +67,11 @@ module.exports = {
     const row = (d, i, y, c) => {
       m.text(ORD[i] || `${i + 1}th`, 2, y, 'normal', c);
       m.text(hhmm(new Date(d.plannedTime)), 2 + ordW, y, 'normal', c);
-      const plat = platformOf(d);
+      const plat = api.platLabel(d, 'Plat ');
       const dest = `${d.line} ${d.destination || ''}`;
-      const pw = plat ? textWidth(`Plat ${plat}`, 'small') + 6 : 0;
+      const pw = plat ? textWidth(plat, 'small') + 6 : 0;
       m.text(fitText(dest, 'normal', W - colDest - statusW - pw - 6), colDest, y, 'normal', c);
-      if (plat) m.textRight(`Plat ${plat}`, W - statusW - 6, y, 'small', C.DIM);
+      if (plat) m.textRight(plat, W - statusW - 6, y, 'small', C.DIM);
       m.textRight(status(d), W - 2, y, 'normal', d.delayMinutes >= 5 ? C.WHITE : c);
     };
 
@@ -142,10 +142,10 @@ function nativeUK(c, t, api) {
     T(ORDN[i] || `${i + 1}th`, x0, y, size);
     T(hhmm(new Date(d.plannedTime)), x0 + 90 * s, y, size);
     const st = status(d), sw = c.measure(st, FU.semi, size * s);
-    const plat = platformOf(d);
-    const pw = plat ? c.measure(`Plat ${plat}`, FU.semi, size * 0.8 * s) + 30 * s : 0;
+    const plat = api.platLabel(d, 'Plat ');
+    const pw = plat ? c.measure(plat, FU.semi, size * 0.8 * s) + 30 * s : 0;
     T(`${d.train || d.line}  ${d.destination}`, x0 + 220 * s, y, size, AMBER, { maxW: x1 - x0 - 220 * s - sw - pw - 30 * s });
-    if (plat) T(`Plat ${plat}`, x1 - sw - 24 * s, y, size * 0.8, DIMA, { align: 'right' });
+    if (plat) T(plat, x1 - sw - 24 * s, y, size * 0.8, DIMA, { align: 'right' });
     T(st, x1, y, size, d.cancelled || d.delayMinutes >= 5 ? WHITE : AMBER, { align: 'right' });
   };
   row(deps[0], 0, 64 * s, 52);

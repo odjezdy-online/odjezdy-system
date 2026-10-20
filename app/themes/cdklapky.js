@@ -76,7 +76,7 @@ module.exports = {
         c.text(ch, (tx + tw / 2 - 1.5) * s, y + h * 0.74, { font: F.plate, size: (ch === '.' ? 50 : 46) * s, color: K.white, align: 'center' });
       });
       plate(...X.zp, y, h, K.plate, d.delayMinutes > 0 ? `${d.delayMinutes} min` : '', 34, K.white, { align: 'center' });
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       plate(...X.nast, y, h, K.plate, plat && rail(d) ? plat : '', 40, K.white, { align: 'center' });
       c.rect(36 * s, y + h + 5 * s, (W / s - 72) * s, Math.max(1, 2 * s), K.rule); // the white rule between rows
     });

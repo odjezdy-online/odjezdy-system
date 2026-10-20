@@ -51,7 +51,7 @@ module.exports = {
       text(c,d.train||d.line,line,y+42*s,29*s,INK,125*s,'left',F.condensed);
       text(c,(d.destination||'cíl neuveden').toUpperCase(),dest,y+42*s,33*s,d.cancelled?RED:INK,gate-dest-24*s,'left',F.condensed);
       text(c,subline(d,api),dest,y+75*s,17*s,DIM,gate-dest-24*s);
-      text(c,api.platformOf(d)||'—',gate+40*s,y+42*s,32*s,[244,247,255],95*s,'center',F.condensed);
+      text(c,api.platMark(d)||'—',gate+40*s,y+42*s,32*s,[244,247,255],95*s,'center',F.condensed);
       const n=api.depNotice(d), late=api.hasDelay(d), msg=d.cancelled?'ZRUŠENO':late?api.delayLabel(d):n?n.text:d.delayMinutes===0?'VČAS':'—';
       text(c,msg,status,y+41*s,26*s,d.cancelled||late?RED:[244,247,255],195*s,'left',F.condensed);
     });

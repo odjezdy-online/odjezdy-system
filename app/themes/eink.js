@@ -42,7 +42,7 @@ module.exports = {
       const destMax = x1 - timeW - colDest;
       c.text(d.destination || '', colDest, y + 46 * s, { font: F.bold, size: 34 * s, color: E.ink, maxW: destMax });
       const n = depNotice(d), plat = platformOf(d);
-      const sub = d.cancelled ? 'spoj odpadá' : n ? n.text : [plat && `nástupiště ${plat}`, api.hasDelay(d) && `zpoždění ${api.delayLabel(d)}`].filter(Boolean).join(' · ');
+      const sub = d.cancelled ? 'spoj odpadá' : n ? n.text : [api.platLabel(d, 'nástupiště '), api.hasDelay(d) && `zpoždění ${api.delayLabel(d)}`].filter(Boolean).join(' · ');
       if (sub) c.text(sub, colDest, y + 72 * s, { font: F.reg, size: 19 * s, color: d.cancelled || n ? E.red : E.grey, maxW: destMax });
       const when = mins <= 0 ? 'nyní' : mins < 60 ? `${mins} min` : hhmm(new Date(depTime(d)));
       c.text(when, x1, y + 48 * s, { font: F.bold, size: 36 * s, color: E.ink, align: 'right' });

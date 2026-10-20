@@ -49,7 +49,7 @@ module.exports = {
       text(c,subline(d,api),dest,y+77*s,18*s,DIM,timeX-dest-22*s);
       text(c,d.cancelled?'—':countdown(api,d,'jetzt'),right,y+48*s,43*s,INK,180*s,'right',F.bold);
       text(c,delay(d,api),right,y+78*s,19*s,RED,180*s,'right');
-      const plat=api.platformOf(d); if(plat) text(c,'Nást. '+plat,x,y+86*s,17*s,DIM,140*s);
+      const plat=api.platLabel(d,'Nást. '); if(plat) text(c,plat,x,y+86*s,17*s,DIM,140*s);
     });
     footer(c,api,pg,s,DIM);
   },

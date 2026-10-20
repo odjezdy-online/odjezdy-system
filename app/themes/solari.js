@@ -66,7 +66,7 @@ module.exports = {
       const alt = (late || n) && Math.floor(t / 4000) % 2 === 1;
       const destText = alt ? (d.cancelled ? 'ODPADÁ' : n ? n.text : `ZPOŽDĚNÍ ${d.delayMinutes} MIN`) : d.destination;
       flap(destText, COLS.dest, colD, y, alt ? S.red : mins <= 0 ? S.yellow : S.white, 300 + i * 90, flipT);
-      flap(platformOf(d), COLS.plat, colP, y, S.white, 500 + i * 90, flipT);
+      flap(api.platMark(d), COLS.plat, colP, y, S.white, 500 + i * 90, flipT);
     });
     if (pages > 1) c.text(`${pg + 1}/${pages}`, x1, c.h - 14 * s, { font: FONT, size: 20 * s, color: S.dim, align: 'right' });
     c.text(api.statusText(), x0, c.h - 14 * s, { font: FONT, size: 20 * s, color: S.dim, maxW: x1 - x0 - 80 * s });

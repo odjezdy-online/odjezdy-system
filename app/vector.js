@@ -217,6 +217,9 @@ function svgMask(svg, pi, w, h) {
 }
 
 // ---------------------------------------------------------------- canvas
+const TRAIN = '\uE000';
+// train front view, 24x24 (own drawing); the windows and lights are counter-wound holes (nonzero fill)
+const TRAIN_SVG = '<svg viewBox="0 0 24 24"><path d="M6 2H18A2 2 0 0 1 20 4V16A3 3 0 0 1 17 19L19.5 22H17.5L15 19H9L6.5 22H4.5L7 19A3 3 0 0 1 4 16V4A2 2 0 0 1 6 2Z M7 5V11H17V5Z M8 14V16H10V14Z M14 14V16H16V14Z"/></svg>';
 class Canvas {
   constructor(w, h) {
     this.w = w; this.h = h;
@@ -315,6 +318,7 @@ class Canvas {
     });
   }
   measure(str, font, size) {
+    if (String(str).includes(TRAIN)) return String(str).split(TRAIN).reduce((w, part, i) => w + (i ? size * 0.95 : 0) + this.measure(part, font, size), 0);
     const f = findFont(font);
     return f ? f.getAdvanceWidth(String(str), size, { kerning: true }) : String(str).length * size * 0.55;
   }
@@ -327,6 +331,15 @@ class Canvas {
   }
   // y is the BASELINE; align 'left' | 'right' | 'center'; returns the advance width
   text(str, x, y, { font, size, color, align = 'left', maxW = 0, alpha = 1 }) {
+    if (String(str).includes(TRAIN)) { // train symbol among the text: drawn as a vector icon
+      const parts = String(str).split(TRAIN), gw = size * 0.95, total = this.measure(str, font, size);
+      let cx = align === 'right' ? x - total : align === 'center' ? x - total / 2 : x;
+      parts.forEach((part, i) => {
+        if (i) { this.svg(TRAIN_SVG, cx, y - size * 0.8, size * 0.85, size * 0.85, { color }); cx += gw; }
+        if (part) cx += this.text(part, cx, y, { font, size, color, alpha });
+      });
+      return total;
+    }
     str = this.fit(str, font, size, maxW);
     if (!str) return 0;
     const m = textMask(font, size, str);

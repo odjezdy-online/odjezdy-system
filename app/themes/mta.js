@@ -67,7 +67,7 @@ module.exports = {
       text(c,label,x+37*s,y+63*s,39*s,bullet===YELLOW?BG:INK,66*s,'center',F.bold);
       text(c,d.destination || 'cíl neuveden',dest,y+46*s,36*s,d.cancelled?RED:INK,end-dest,'left',F.bold);
       const plat=api.platformOf(d);
-      text(c,[subline(d,api),plat && 'Nást. '+plat].filter(Boolean).join(' · '),dest,y+78*s,18*s,DIM,end-dest);
+      text(c,[subline(d,api),api.platLabel(d,'Nást. ')].filter(Boolean).join(' · '),dest,y+78*s,18*s,DIM,end-dest);
       text(c,d.cancelled?'Canceled':countdown(api,d,'Due'),right,y+46*s,39*s,d.cancelled?RED:INK,195*s,'right',F.bold);
       if(!d.cancelled) text(c,delay(d,api),right,y+78*s,20*s,RED,180*s,'right');
       c.hline(dest,right,y+row-4*s,[55,55,55],1);

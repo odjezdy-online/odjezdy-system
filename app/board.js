@@ -53,6 +53,18 @@ for (const f of Object.values(FONTS)) {
     f.glyphs[ch] = { w, bits: rows.map((h) => (h === '0' ? 0n : BigInt('0x' + h))) };
   }
 }
+// LED train symbol (front view, 9x7 dots, doubled in the big faces) as the glyph U+E000 of every face
+const TRAIN_ROWS = [0xFE, 0x17D, 0x17D, 0x1FF, 0x145, 0xFE, 0x183];
+for (const f of Object.values(FONTS)) {
+  const k = f.rows >= 14 ? 2 : 1, w = 9 * k, top = Math.max(0, Math.floor((f.rows - 7 * k) / 2));
+  const bits = new Array(f.rows).fill(0n);
+  TRAIN_ROWS.forEach((r, i) => {
+    let v = 0n;
+    for (let x = 0; x < 9; x++) if ((r >> (8 - x)) & 1) for (let q = 0; q < k; q++) v |= 1n << BigInt(w - 1 - (x * k + q));
+    for (let q = 0; q < k; q++) if (top + i * k + q < f.rows) bits[top + i * k + q] = v;
+  });
+  f.glyphs['\uE000'] = { w, bits };
+}
 const FONT_FAMILIES = [...new Set(Object.keys(FONTS).filter((k) => /-(small|normal|big)$/.test(k)).map((k) => k.replace(/-(small|normal|big)$/, '')))];
 const FONT_NAMES = {};
 try { for (const id of FONT_FAMILIES) FONT_NAMES[id] = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'fonts', id + '.json'), 'utf8')).family; } catch {}
@@ -543,8 +555,11 @@ function searchStops(q, limit = 6) {
 // ---------------------------------------------------------------- config
 const pickStop = (s) => ({ name: s.name, ids: s.ids, city: s.city, ...(s.source ? { source: s.source, country: s.country } : {}) });
 // "Hlavní nádraží" exists in many towns -> show the town unless the name already says it
+// source names have stray commas and missing spaces: "Teplice,,Hlavní nádraží", "Dubí,lázně", "Ústí n.L.hl.n."
+const tidyName = (n) => (typeof n === 'string' ? n.replace(/,+(?=\S)/g, ', ').replace(/\.(?=\p{Ll}{2})/gu, '. ') : n);
 function stopLabel(s) {
   if (!s) return '';
+  s = { ...s, name: tidyName(s.name) };
   if (s.source === 'transitous') return s.city && !s.name.includes(s.city) ? `${s.name} (${s.city})` : s.name;
   const dupes = loadStops().filter((x) => x.name === s.name).length;
   return dupes > 1 && s.city && !norm(s.name).includes(norm(s.city).split(' ')[0]) ? `${s.name} (${s.city})` : s.name;
@@ -832,6 +847,7 @@ async function refreshBoard() {
     seen.set(k, d); all.push(d);
   }
   all.sort((a, b) => depTime(a) - depTime(b));
+  for (const d of all) { d.destination = tidyName(d.destination); if (d.via) d.via = d.via.map(tidyName); }
   state.deps = all;
   if (state.v2Alerts?.length) state.alerts = [...new Set([...state.alerts, ...state.v2Alerts])].slice(0, 6);
   state.lastOk = now;
@@ -1174,7 +1190,13 @@ function renderDisruption(m, t) {
 // data, DUK = Ústecký kraj), not always something a passenger knows, so JDF is not shown
 const PROVIDER_LABEL = { JDF: '', DUK: 'DÚK' };
 const providerLabel = (d) => (d.provider in PROVIDER_LABEL ? PROVIDER_LABEL[d.provider] : d.provider || '');
+// a train row without a platform gets a small train symbol (private-use glyph U+E000, drawn by the LED fonts and the vector canvas)
+const TRAIN = '\uE000';
+const isRailRow = (d) => d.type === 'train' || d.type === 'rail';
+const platMark = (d) => platformOf(d) || (isRailRow(d) ? TRAIN : '');
+const platLabel = (d, prefix = '') => { const p = platformOf(d); return p ? prefix + p : isRailRow(d) ? TRAIN : ''; };
 const themeApi = {
+  platMark, platLabel,
   providerLabel,
   vector: () => vector,
   state, C, FONTS: FONT_VIEW, textWidth, fitText, faceCovers, wrapText, stopLabel, hhmm, pad2,

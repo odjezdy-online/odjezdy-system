@@ -94,10 +94,11 @@ module.exports = {
         T('zrušeno', headR, base - 30 * s, 28, K.cancel, { font: F.reg, align: 'right' });
         T('canceled', headR, base + 2 * s, 28, K.cancel, { font: F.reg, align: 'right' });
       }
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat) { // white circle with the platform / stop mark
         c.roundRect(platCx - 37.5 * s, y0 + rowH / 2 - 37.5 * s, 75 * s, 75 * s, 37.5 * s, K.white);
-        T(plat, platCx, y0 + rowH / 2 + 16 * s, plat.length > 2 ? 30 : 45, K.bg, { align: 'center', maxW: 66 * s });
+        const psz = Math.max(18, Math.min(plat.length > 2 ? 30 : 45, (45 * 62 * s) / Math.max(1, c.measure(plat, F.semi, 45 * s)) * (plat.length > 2 ? 0.8 : 1))); // long values ("3 / 5") shrink instead of being cut
+        T(plat, platCx, y0 + rowH / 2 + 16 * s, psz, K.bg, { align: 'center' });
       }
     });
 

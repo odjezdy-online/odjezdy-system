@@ -49,7 +49,7 @@ module.exports = {
       const when = urban ? (mins <= 0 ? 'jetzt' : mins < 60 ? `${mins}'` : hhmm(new Date(api.depTime(d)))) : hhmm(new Date(d.plannedTime));
       m.text(when, colTime, y, 'normal', urban && mins <= 0 ? C.ACCENT : C.AMBER);
       if (d.delayMinutes > 0 && !urban) m.text(`+${d.delayMinutes}'`, colTime, y + nor + 2, 'small', C.ACCENT);
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat) {
         m.textRight(fitText(plat, 'normal', platW), W - 3, y, 'normal', C.AMBER);
         m.textRight(d.type === 'train' ? 'Gleis' : 'Kante', W - 3, y + nor + 2, 'small', C.DIM);
@@ -117,7 +117,7 @@ function nativeSBB(c, t, api) {
       c.roundRect(x1 - platW - opW - 10 * s, y + 62 * s, opW, 22 * s, 4 * s, SB.line);
       c.text(api.providerLabel(d), x1 - platW - opW / 2 - 10 * s, y + 78 * s, { font: FS.bold, size: 16 * s, color: SB.white, align: 'center' });
     }
-    const plat = platformOf(d);
+    const plat = api.platMark(d);
     if (plat) {
       c.text(plat, x1, y + 48 * s, { font: FS.bold, size: 34 * s, color: SB.white, align: 'right' });
       c.text(d.type === 'train' ? 'Gleis' : 'Kante', x1, y + 76 * s, { font: FS.reg, size: 18 * s, color: SB.dim, align: 'right' });

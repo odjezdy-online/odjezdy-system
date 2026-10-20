@@ -52,7 +52,7 @@ module.exports = {
       const via = n ? n.text : d.via?.length ? d.via.slice(0, 3).join(' – ') : '';
       if (via) T(via, X.smer * s, y, 30, n ? RED : col, { maxW: (X.cas - X.smer - 12) * s });
       T(hhmm(new Date(d.plannedTime || depTime(d))), X.cas * s, y, 38, col, { font: F.semi });
-      const plat = platformOf(d);
+      const plat = api.platMark(d);
       if (plat && rail(d)) T(plat, X.kolej * s, y, 36, col, { font: F.semi });
       if (d.cancelled) T('ZRUŠEN', X.zp * s, y, 30, RED, { align: 'right', font: F.semi });
       else if (d.delayMinutes > 0) T(String(d.delayMinutes), X.zp * s, y, 36, col, { align: 'right', font: F.semi });

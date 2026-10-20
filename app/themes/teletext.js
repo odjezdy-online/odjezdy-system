@@ -74,8 +74,8 @@ module.exports = {
       write(d.destination||'cíl neuveden',8,row,INK,23);
       write(d.cancelled?'ODPADA':countdown(api,d,'TED'),32,row,d.cancelled?red:yellow,8);
       write(subline(d,api),2,row+1,DIM,38);
-      const plat=api.platformOf(d);
-      write([plat&&'NAST. '+plat,delay(d,api)].filter(Boolean).join('  '),2,row+2,d.cancelled||api.hasDelay(d)?red:green,38);
+      const plat=api.platformOf(d)?'NAST. '+api.platformOf(d):api.platMark(d)?'VLAK':'';
+      write([plat,delay(d,api)].filter(Boolean).join('  '),2,row+2,d.cancelled||api.hasDelay(d)?red:green,38);
     });
     c.rect(0,22*ch,W,ch,blue);
     write('ODJEZDY  /  P'+(100+pg.page)+(pg.pages>1?'  '+(pg.page+1)+'/'+pg.pages:''),1,22,INK,38);
