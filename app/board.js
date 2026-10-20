@@ -747,7 +747,7 @@ async function fetchBoardRows(ids) {
     try {
       const j = await getJson(`/api/v2/departures?stopIds=${ids.map(encodeURIComponent).join(',')}&limit=120`);
       // PID notices from the departure board itself (infotexts: inline strip / full-screen) plus our alerts
-      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...[...(j.alerts || []), ...(j.relatedAlerts || [])].filter(alertActive).filter((al) => {
+      state.v2Alerts = [...(j.infotexts || []).map((i) => cleanText(i.text)), ...[...(j.alerts || []), ...(j.relatedAlerts || []).slice(0, 3)].filter(alertActive).filter((al) => {
         // an alert that names no stops and was matched by line number only belongs to this stop only when a departure
         // of the alert's own operator runs here (a DÚK alert about U1/R15 must not follow ČD's R15 to Praha)
         const provs = new Set((j.data || []).map((d) => d.provider));
