@@ -2,6 +2,11 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.9
+- Oznámení ukáže pod podrobnostmi původní znění hlášení od dopravce (DÚK, SŽ, ČD, PID), když je místo
+- Ukazují se i související výluky: hlášení, která se týkají linek jedoucích přes zastávku (např. objížďka linek 480 a 490 v Teplicích), nejvýš 3 najednou
+- Podrobnosti hlášení využijí celé volné místo na LED displejích
+
 ## 0.5.8
 - Podrobnosti hlášení se na celoobrazovém oznámení už neusekávají, využijí celé volné místo
 - Dlouhé nadpisy výluk vlaků (ČD) se vejdou celé
