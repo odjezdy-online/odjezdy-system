@@ -89,7 +89,7 @@ if [ "$DESKTOP" != none ]; then
   python3 "$HERE/qmp.py" "$QMP" type 'test\n'; sleep 8
   python3 "$HERE/qmp.py" "$QMP" type 'loadkezs us\n'; sleep 2
   # (qmp.py cannot type braces: a subshell in parentheses it is)
-  python3 "$HERE/qmp.py" "$QMP" type '( echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager | grep -v cage | tail -70; ls -la /run/user/0 /dev/input; pgrep -a cage; pgrep -a odjezdy-wl; pgrep -a node; echo DIAG-END ) > /dev/ttyS0 2>&1\n'
+  python3 "$HERE/qmp.py" "$QMP" type '( echo DIAG-START; systemctl is-active odjezdy-kiosk; systemctl status odjezdy-kiosk --no-pager; journalctl -u odjezdy-kiosk --no-pager | grep "board\|odjezdy-wl\|resized\|exiting\|SIGTERM\|rror\|node\|Cannot\|fail" | grep -v "Xwayland\|XWayland\|Scheduled\|Started\|systemd" | tail -60; ls -la /run/user/0 /dev/input; pgrep -a cage; pgrep -a odjezdy-wl; pgrep -a node; echo DIAG-END ) > /dev/ttyS0 2>&1\n'
   wait_for 'DIAG-END' $((30 * K)) || echo "(no diagnostics: the login on tty2 did not take the keys)"
   tr -d '\000\r' < "$SER" | sed -n '/DIAG-START/,/DIAG-END/p' | tail -100
   S1=$(stat -c %s "$TMP/vt1.png"); S2=$(stat -c %s "$TMP/vt2.png")
