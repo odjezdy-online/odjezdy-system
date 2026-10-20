@@ -2,6 +2,10 @@
 
 Poznámky k vydání se berou odsud (sekce `## verze`) a ukazuje je i obrazovka Aktualizace v tabuli, proto jsou krátké a česky.
 
+## 0.5.7
+- Krátké hlášení v pruhu se už nezobrazuje dvakrát za sebou
+- Hlášení bez podrobností se doplní celým textem z popisu, takže se už nezkracuje („PRODLOUŽ…“)
+
 ## 0.5.6
 - Zpožděné spoje zůstávají na tabuli až do skutečného odjezdu, ne jen do plánovaného času
 - Běžící text pokračuje i při zobrazené mimořádnosti, celá tabule se nesekne
